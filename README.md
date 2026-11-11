@@ -120,14 +120,14 @@ Read [AGENT_GUIDE.md](AGENT_GUIDE.md) for tool semantics and recovery. Tests use
 
 ### GitHub Actions
 
-Pushing a tag beginning with `v` (for example, `v0.1.0`) triggers `.github/workflows/tag-build.yml`. Branch pushes and pull requests do not trigger this workflow. The Ubuntu runner installs Temurin JDK 25, runs `mvn clean verify -DskipTests=false`, exercises the runnable JAR and launchers, and creates two distribution archives. Artifacts are retained for 30 days. Failure diagnostics are retained for 7 days. The workflow does not publish a GitHub Release or access private service credentials.
+Pushing a tag beginning with `v` (for example, `v0.1.0`) triggers `.github/workflows/tag-build.yml`. Branch pushes and pull requests do not trigger this workflow. The Ubuntu runner installs Temurin JDK 25, runs `mvn clean verify -DskipTests=false`, exercises the runnable JAR and launchers, and creates two distribution archives. After successful verification and artifact upload, it publishes a GitHub Release for the existing tag with generated release notes and attaches both archives. Rerunning the workflow replaces attachments with the same names. The workflow uses the built-in `GITHUB_TOKEN` with `contents: write`; no additional token or private service credentials are needed. Actions artifacts are retained for 30 days and failure diagnostics for 7 days; Release attachments are independent of artifact retention.
 
 | Artifact | Archive | Contents under `omni-connect-mcp/` |
 | --- | --- | --- |
 | `omni-connect-mcp-<tag>-windows` | `omni-connect-mcp-<tag>-windows.zip` | Runnable JAR, example `application.yml`, `omni-connect.cmd`, `omni-connect.ps1`, `omni-connect-stdio.cmd`, `omni-connect-stdio.ps1` |
 | `omni-connect-mcp-<tag>-linux` | `omni-connect-mcp-<tag>-linux.tar.gz` | Runnable JAR, example `application.yml`, `omni-connect.sh`, `omni-connect-stdio` |
 
-Linux launchers have executable permissions in the tar archive. Both packages require an installed JDK 25+; neither bundles a JDK. GitHub wraps each uploaded artifact in its own download ZIP; extract that wrapper to obtain the distribution archive. Local Maven packaging still exports only the runnable JAR. To create both archives locally after building, run `python scripts/package_release.py v0.1.0`; outputs appear under `target/dist/`.
+Linux launchers have executable permissions in the tar archive. Both packages require an installed JDK 25+; neither bundles a JDK. Download the named platform archives directly from the [Releases page](https://github.com/frankzhang89/omni-connect-mcp/releases). GitHub's automatically generated `Source code` archives contain repository source, not the runnable application. Actions artifacts remain available as a secondary download; GitHub wraps each in its own download ZIP. Local Maven packaging still exports only the runnable JAR. To create both archives locally after building, run `python scripts/package_release.py v0.1.0`; outputs appear under `target/dist/`.
 
 Commit the intended source first, then create and push its tag:
 

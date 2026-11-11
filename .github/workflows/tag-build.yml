@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: tag-build-${{ github.ref }}
@@ -58,6 +58,21 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          windows_archive="target/dist/omni-connect-mcp-${RELEASE_VERSION}-windows.zip"
+          linux_archive="target/dist/omni-connect-mcp-${RELEASE_VERSION}-linux.tar.gz"
+          if gh release view "$RELEASE_VERSION" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_VERSION" "$windows_archive" "$linux_archive" --clobber
+          else
+            gh release create "$RELEASE_VERSION" "$windows_archive" "$linux_archive" \
+              --verify-tag --title "$RELEASE_VERSION" --generate-notes
+          fi
 
       - name: Upload failure diagnostics
         if: failure()
