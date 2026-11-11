@@ -144,7 +144,7 @@ def main():
             child.rpc('tools/list', {})
             child.finish()
         assert len(list((work / 'log').glob('omni-connect-stdio-*.log'))) >= 3
-        assert (work / 'application.yml').read_bytes() == (RELEASE / 'application.yml').read_bytes()
+        assert (work / 'application.yml').read_bytes() == (ROOT / 'application.yml').read_bytes()
         print('Executable JAR, three stdio children, EOF, isolation and release layout: OK')
     finally:
         for child in children:
