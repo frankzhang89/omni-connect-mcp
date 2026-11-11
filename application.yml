@@ -1,0 +1,101 @@
+# The only deployment configuration; runtime connections never modify this file.
+spring:
+  application:
+    name: omni-connect-mcp
+  ai:
+    mcp:
+      server:
+        name: omni-connect-mcp
+        version: 0.1.0
+        stdio: false
+        protocol: STREAMABLE
+        type: SYNC
+        annotation-scanner:
+          enabled: false
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /mcp
+        instructions: >-
+          Use connector_status and the connection tools to activate capabilities.
+          Connections are shared by this process, memory-only, and reset on restart.
+          Refresh tools after activation. Nacos publication replaces the entire document
+          without conversion. Apollo item updates publish by default. Read before editing
+          and verify writes. Never blindly retry an unknown write outcome. Use the
+          connected database dialect. Explicit transactions belong to their MCP session
+          and retain their original data source across switches. Read AGENT_GUIDE.md.
+server:
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  port: ${SERVER_PORT:8285}
+omni:
+  auth:
+    enabled: true
+    # Set a real token before HTTP startup. Stdio does not use HTTP authentication.
+    token: ${OMNI_AUTH_TOKEN:}
+  config:
+    http:
+      connect-timeout: 3s
+      read-timeout: 10s
+    apollo:
+      enabled: false
+      meta: ${APOLLO_META:}
+      app-id: ${APOLLO_APP_ID:}
+      cluster: default
+      namespace: application
+      file-type: properties
+      access-key: ${APOLLO_ACCESS_KEY:}
+      portal-url: ${APOLLO_PORTAL_URL:}
+      openapi-token: ${APOLLO_OPENAPI_TOKEN:}
+      env: ${APOLLO_ENV:}
+      operator: ${APOLLO_OPERATOR:}
+      released-by: ${APOLLO_RELEASED_BY:}
+    nacos:
+      enabled: false
+      server-addr: ${NACOS_SERVER_ADDR:}
+      context-path: /nacos
+      username: ${NACOS_USERNAME:}
+      password: ${NACOS_PASSWORD:}
+      namespace: ""
+      group: DEFAULT_GROUP
+      file-type: yaml
+  jdbc:
+    enabled: false
+    connection:
+      url: ${JDBC_URL:}
+      username: ${JDBC_USERNAME:}
+      password: ${JDBC_PASSWORD:}
+      max-active: 3
+      min-idle: 0
+      connection-timeout: 5000
+    switch:
+      timeout-seconds: 15
+      validation-timeout-seconds: 5
+    query:
+      max-rows: 100
+      timeout-seconds: 10
+      max-cell-chars: 4000
+    write:
+      allow-ddl: true
+    transaction:
+      idle-timeout-seconds: 120
+      max-lifetime-seconds: 600
+      max-active: 5
+      max-statements: 20
+      max-sql-chars: 20000
+      script-timeout-seconds: 30
+  redis:
+    enabled: false
+    connection:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+    limits:
+      max-databases: 16
+      max-scan-count: 100
+      max-items: 100
+      max-value-chars: 4000

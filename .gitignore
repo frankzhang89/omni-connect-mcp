@@ -1,0 +1,10 @@
+**/target/
+/.idea/
+*.iml
+/log/
+/run/
+*.log
+__pycache__/
+*.py[cod]
+.env
+application-local.yml

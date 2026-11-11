@@ -1,0 +1,51 @@
+<?xml version="1.0" ?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.1</version>
+        <relativePath/>
+    </parent>
+    <groupId>xyz.fz</groupId>
+    <artifactId>omni-connect-mcp</artifactId>
+    <version>0.1.0</version>
+    <packaging>pom</packaging>
+    <name>omni-connect-mcp</name>
+    <properties>
+        <java.version>25</java.version>
+        <spring-ai.version>2.0.1</spring-ai.version>
+        <jsqlparser.version>5.4</jsqlparser.version>
+        <ojdbc.version>23.26.3.0.0</ojdbc.version>
+        <starrocks-connector.version>1.1.1</starrocks-connector.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Override with -Dbase.export.path=/absolute/output/directory. -->
+        <base.export.path>${maven.multiModuleProjectDirectory}/target/release</base.export.path>
+        <skipTests>true</skipTests>
+    </properties>
+    <modules>
+        <module>omni-connect-core</module>
+        <module>omni-connect-config</module>
+        <module>omni-connect-jdbc</module>
+        <module>omni-connect-redis</module>
+        <module>omni-connect-app</module>
+    </modules>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

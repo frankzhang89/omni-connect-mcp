@@ -1,0 +1,42 @@
+package xyz.fz.omni.core.auth;
+
+import jakarta.servlet.DispatcherType;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+
+/** Registers authentication early and exposes the verifier as a database startup dependency. */
+@Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(BearerAuthProperties.class)
+public class McpAuthConfiguration {
+    @Bean
+    public BearerTokenVerifier mcpBearerVerifier(
+            BearerAuthProperties properties,
+            @Value("${spring.ai.mcp.server.stdio:false}") boolean stdio) {
+        // Stdio has no HTTP Authorization header. Keep this startup dependency without validating
+        // an unused token.
+        return new BearerTokenVerifier(stdio ? new BearerAuthProperties(false, null) : properties);
+    }
+
+    @Bean
+    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+    public FilterRegistrationBean<McpBearerFilter> mcpBearerFilter(
+            BearerTokenVerifier verifier,
+            @Value("${spring.ai.mcp.server.streamable-http.mcp-endpoint:/mcp}") String endpoint) {
+        var registration = new FilterRegistrationBean<>(new McpBearerFilter(verifier, endpoint));
+        // Register broadly; the filter itself matches the normalized configured endpoint.
+        registration.addUrlPatterns("/*");
+        registration.setDispatcherTypes(
+                DispatcherType.REQUEST,
+                DispatcherType.ASYNC,
+                DispatcherType.ERROR,
+                DispatcherType.FORWARD);
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+        return registration;
+    }
+}

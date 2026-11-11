@@ -1,0 +1,19 @@
+purpose:
+  stands_in_for: Apollo and Nacos 2.x HTTP APIs
+  unblocks: Local MCP migration and Nacos discovery checks
+assumptions:
+  - id: nacos-namespace-list
+    status: supported
+    claim: The Nacos 2.x namespace list returns metadata and the configuration count for each namespace.
+    reason: The v2 console API documents a successful response with a data array.
+    verification: The MCP integration test exercised this response through a local HTTP fixture. The Postman mock and a live Nacos instance were not exercised. On 2026-11-11 the migrated MCP integration tests and runtime activation tests passed against the local HTTP fixture in omni-connect-mcp.
+    source: https://nacos.io/en/docs/v2/open-api/#query-namespaces
+    updated_at: "2026-11-11"
+  - id: nacos-exact-group-count
+    status: supported
+    claim: Nacos 2.4.3 accurate search with an empty dataId returns the total and a page of configurations for the selected namespace and group.
+    reason: The server applies namespace and group filters before counting and paginating.
+    verification: Local HTTP fixture tests cover zero results, group and namespace isolation, and the complete list across two pages. These checks passed again on 2026-11-11 after migration into omni-connect-config and omni-connect-app; no Postman simulation or live provider was exercised.
+    source: https://github.com/alibaba/nacos/blob/2.4.3/config/src/main/java/com/alibaba/nacos/config/server/controller/ConfigController.java#L373-L398
+    updated_at: "2026-11-11"
+fingerprints: []

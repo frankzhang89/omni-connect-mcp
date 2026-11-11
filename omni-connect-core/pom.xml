@@ -1,0 +1,16 @@
+<?xml version="1.0" ?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>xyz.fz</groupId>
+        <artifactId>omni-connect-mcp</artifactId>
+        <version>0.1.0</version>
+    </parent>
+    <artifactId>omni-connect-core</artifactId>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
+        </dependency>
+    </dependencies>
+</project>
