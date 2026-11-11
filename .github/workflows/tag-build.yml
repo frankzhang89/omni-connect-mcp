@@ -1,0 +1,58 @@
+name: Build tagged version
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and package runnable JAR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 25
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Build and run all tests
+        run: mvn --batch-mode --no-transfer-progress clean verify -DskipTests=false
+
+      - name: Verify runnable JAR and launchers
+        run: python3 tests/test_release.py
+
+      - name: Upload runnable JAR
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: omni-connect-mcp-${{ github.ref_name }}
+          path: target/release/omni-connect-mcp/omni-connect-mcp.jar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: diagnostics-${{ github.ref_name }}
+          path: |
+            **/target/surefire-reports/
+            target/launcher tests with spaces/log/
+            target/launcher tests with spaces/capture-*.txt
+          if-no-files-found: ignore
+          retention-days: 7

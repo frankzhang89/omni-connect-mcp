@@ -118,4 +118,16 @@ Read [AGENT_GUIDE.md](AGENT_GUIDE.md) for tool semantics and recovery. Tests use
 
 ## Verification
 
+### GitHub Actions
+
+Pushing a tag beginning with `v` (for example, `v0.1.0`) triggers `.github/workflows/tag-build.yml`. Branch pushes and pull requests do not trigger this workflow. The Ubuntu runner installs Temurin JDK 25, runs `mvn clean verify -DskipTests=false`, exercises the runnable JAR and launchers, and uploads an artifact named `omni-connect-mcp-<tag>` containing only `omni-connect-mcp.jar`. Artifacts are retained for 30 days. Failure diagnostics are retained for 7 days. The workflow does not publish a GitHub Release or access private service credentials.
+
+Commit the intended source first, then create and push its tag:
+
+```bash
+git tag -a v0.1.0 -m "Release v0.1.0"
+git push origin main
+git push origin v0.1.0
+```
+
 `mvn clean verify -DskipTests=false` runs the unit and application tests and exports the runnable JAR. Tests are skipped by default through the parent POM property. Test-only H2 is not bundled. To exercise the actual exported JAR, HTTP lifecycle scripts, authentication, a Windows stdio wrapper, and concurrent stdio children, run `python tests/test_release.py` with `JAVA_HOME` pointing to JDK 25. The release smoke test combines the exported JAR with configuration and launchers from the project root in its own deployment under `target/`, uses an ephemeral HTTP port, and stops only the process it launched. On Unix it exercises the corresponding shell wrappers; run that check on a Unix host with the documented utilities installed.
