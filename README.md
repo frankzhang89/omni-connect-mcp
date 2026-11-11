@@ -120,7 +120,14 @@ Read [AGENT_GUIDE.md](AGENT_GUIDE.md) for tool semantics and recovery. Tests use
 
 ### GitHub Actions
 
-Pushing a tag beginning with `v` (for example, `v0.1.0`) triggers `.github/workflows/tag-build.yml`. Branch pushes and pull requests do not trigger this workflow. The Ubuntu runner installs Temurin JDK 25, runs `mvn clean verify -DskipTests=false`, exercises the runnable JAR and launchers, and uploads an artifact named `omni-connect-mcp-<tag>` containing only `omni-connect-mcp.jar`. Artifacts are retained for 30 days. Failure diagnostics are retained for 7 days. The workflow does not publish a GitHub Release or access private service credentials.
+Pushing a tag beginning with `v` (for example, `v0.1.0`) triggers `.github/workflows/tag-build.yml`. Branch pushes and pull requests do not trigger this workflow. The Ubuntu runner installs Temurin JDK 25, runs `mvn clean verify -DskipTests=false`, exercises the runnable JAR and launchers, and creates two distribution archives. Artifacts are retained for 30 days. Failure diagnostics are retained for 7 days. The workflow does not publish a GitHub Release or access private service credentials.
+
+| Artifact | Archive | Contents under `omni-connect-mcp/` |
+| --- | --- | --- |
+| `omni-connect-mcp-<tag>-windows` | `omni-connect-mcp-<tag>-windows.zip` | Runnable JAR, example `application.yml`, `omni-connect.cmd`, `omni-connect.ps1`, `omni-connect-stdio.cmd`, `omni-connect-stdio.ps1` |
+| `omni-connect-mcp-<tag>-linux` | `omni-connect-mcp-<tag>-linux.tar.gz` | Runnable JAR, example `application.yml`, `omni-connect.sh`, `omni-connect-stdio` |
+
+Linux launchers have executable permissions in the tar archive. Both packages require an installed JDK 25+; neither bundles a JDK. GitHub wraps each uploaded artifact in its own download ZIP; extract that wrapper to obtain the distribution archive. Local Maven packaging still exports only the runnable JAR. To create both archives locally after building, run `python scripts/package_release.py v0.1.0`; outputs appear under `target/dist/`.
 
 Commit the intended source first, then create and push its tag:
 

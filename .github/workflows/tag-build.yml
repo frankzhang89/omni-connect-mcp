@@ -36,11 +36,25 @@ jobs:
       - name: Verify runnable JAR and launchers
         run: python3 tests/test_release.py
 
-      - name: Upload runnable JAR
+      - name: Package Windows and Linux distributions
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: python3 scripts/package_release.py "$RELEASE_VERSION"
+
+      - name: Upload Windows distribution
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: omni-connect-mcp-${{ github.ref_name }}
-          path: target/release/omni-connect-mcp/omni-connect-mcp.jar
+          name: omni-connect-mcp-${{ github.ref_name }}-windows
+          path: target/dist/*-windows.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload Linux distribution
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: omni-connect-mcp-${{ github.ref_name }}-linux
+          path: target/dist/*-linux.tar.gz
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
