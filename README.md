@@ -451,13 +451,13 @@ See [AGENT_GUIDE.md](AGENT_GUIDE.md) for detailed transaction, publication, and 
 
 ## Build from source
 
-Select JDK 25 and run Maven 3.6.3+ recursively from the project root:
+Select JDK 25+ and run Maven 3.8+ recursively from the project root:
 
 ```powershell
 mvn clean package
-mvn clean package '-Dbase.export.path=E:/opt/packaging'
+mvn clean package '-Dbase.export.path={yourExpectedPath}'
 ```
 
-The default export is `target/release/omni-connect-mcp/omni-connect-mcp.jar`; the second command exports it to `E:/opt/packaging/omni-connect-mcp/omni-connect-mcp.jar`. Maven exports only the runnable JAR. Copy the example YAML and required platform launchers separately when assembling a deployment from a local build. Intermediate artifacts remain in module `target/` directories. Disable the IntelliJ Maven **Non-recursive** option; `-N` builds only the root aggregator.
+The default export is `target/release/omni-connect-mcp/omni-connect-mcp.jar`. Replace `{yourExpectedPath}` with your desired absolute output directory; the second command exports the JAR to `{yourExpectedPath}/omni-connect-mcp/omni-connect-mcp.jar`. Maven exports only the runnable JAR. Copy the example YAML and required platform launchers separately when assembling a deployment from a local build. Intermediate artifacts remain in module `target/` directories.
 
 Tests are skipped by default. Run `mvn clean verify -DskipTests=false` to execute them and `python tests/test_release.py` with `JAVA_HOME` set to JDK 25 to exercise the packaged JAR and launchers.
