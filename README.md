@@ -1,70 +1,83 @@
 # Omni Connect MCP
 
-A modular MCP server for Apollo, Nacos 2.x, JDBC databases, and standalone Redis. One deployment contains one executable JAR and one external `application.yml`. Java 25+, Maven 3.6.3+, Spring Boot 4.1.1, and Spring AI 2.0.1 are used.
+One MCP server for Apollo, Nacos, relational databases, and standalone Redis. It runs from one executable JAR with one external `application.yml` and supports both stdio and Streamable HTTP.
 
-## Build and deploy
+## Capabilities
 
-Select JDK 25 before building:
+| Connector | Capabilities |
+| --- | --- |
+| Apollo | Read published configurations; read and update existing properties items through Portal OpenAPI; optionally publish updates. |
+| Nacos | Discover namespaces and configuration IDs; read, create, and replace complete configuration documents. Namespace discovery supports the V1 and V2 APIs. |
+| JDBC | Connect to MySQL, PostgreSQL, Oracle, SQL Server, and StarRocks; inspect metadata; query data; execute DML and DDL; manage explicit transactions and switch databases at runtime. |
+| Redis | Connect to standalone Redis; scan keys; inspect type, TTL, and size; read and write string, list, set, hash, and sorted-set values; manage expiry and logical database selection. |
+| Configuration conversion | Convert properties and YAML offline, without connecting to a configuration server. |
 
-```powershell
-$env:JAVA_HOME = 'C:\Program Files\Java\jdk-25.0.1'
-$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-mvn -B -ntp clean package
+## Quick start
+
+Java 25+ is required. Download the Windows ZIP or Linux tar.gz from the [Releases page](https://github.com/frankzhang89/omni-connect-mcp/releases). Extract the platform archive and keep the JAR, example YAML, and launchers together:
+
+```text
+omni-connect-mcp/
+  omni-connect-mcp.jar
+  application.yml
+  <platform launchers>
 ```
 
-Packaging exports only `omni-connect-mcp.jar` to `target/release/omni-connect-mcp/`. Library JARs and `.jar.original` files stay outside this directory. For deployment, copy the JAR to its destination and separately copy `application.yml` and any required launchers from the project root. Edit the external YAML; it is not embedded in the JAR. Set `OMNI_AUTH_TOKEN` to a real shared Bearer token before HTTP startup, or explicitly disable `omni.auth.enabled`.
+The `Source code` downloads contain source files, not the runnable application. A JDK is not bundled with either platform package.
 
-Override the parent POM's `base.export.path` property to export the runnable JAR elsewhere:
+### Streamable HTTP
 
-```powershell
-mvn clean package '-Dbase.export.path=E:/opt/packaging'
-```
+Edit `application.yml`, then set the HTTP Bearer token and start the server.
 
-This creates `E:/opt/packaging/omni-connect-mcp/omni-connect-mcp.jar`. No configuration, launchers, or documentation are exported. The default base is `${maven.multiModuleProjectDirectory}/target/release`. Compilation and intermediate module artifacts remain in each module's `target/`. Export also runs during `verify` and replaces the exported JAR. Maven `clean` cleans build artifacts, not a custom external export directory. Files exported by earlier versions remain in an existing external directory until removed manually.
-
-Build recursively from the root POM. In IntelliJ IDEA, disable the Maven **Non-recursive** option. An invocation containing `--non-recursive` or `-N` builds only the root aggregator (`packaging=pom`) and can report success without producing an executable JAR. A complete build lists the root project and all five modules in its reactor summary.
-
-In PowerShell, quote the entire `-Dbase.export.path=...` argument as shown above. An unquoted dotted property can be split into separate arguments, producing an error such as `No plugin found for prefix '.export.path=E'` before packaging starts. Run `mvn -version` to confirm that Maven itself uses Java 25+, rather than an older default JDK. Launcher JDK settings do not select Maven's JDK; an IDE's Maven runner must also use JDK 25+.
+Windows PowerShell:
 
 ```powershell
-$env:OMNI_AUTH_TOKEN = '<your-secret-token>'
+$env:OMNI_AUTH_TOKEN = '<your-shared-token>'
 .\omni-connect.cmd start
 .\omni-connect.cmd stop
 .\omni-connect.cmd restart --server.port=8286
 ```
 
+Linux:
+
 ```bash
-export OMNI_AUTH_TOKEN='<your-secret-token>'
+export OMNI_AUTH_TOKEN='<your-shared-token>'
 bash ./omni-connect.sh start
 bash ./omni-connect.sh stop
 bash ./omni-connect.sh restart --server.port=8286
 ```
 
-The HTTP endpoint defaults to `http://localhost:8285/mcp`. HTTP launchers force HTTP mode, validate the replacement before restart, identify their own process using a deployment-specific JVM marker, and leave client-owned stdio children alone. Linux requires Bash 4.4+, `flock`, `setsid`, `readlink`, and `ss`. HTTP lifecycle operations are serialized per deployment directory. Use separate deployment directories and ports for multiple managed HTTP services.
+Configure your MCP client with:
 
-On Windows, double-click `omni-connect.cmd` to open the menu. Up/Down and 1/2/3 select an action; Enter executes it immediately. Restart is selected initially. Five seconds without keyboard input executes the currently selected action; navigation resets the countdown. Explicit actions and redirected invocations skip the menu. Closing the launcher after startup leaves Java running.
+| Client setting | Value |
+| --- | --- |
+| Transport | Streamable HTTP |
+| URL | `http://localhost:8285/mcp` |
+| Header | `Authorization: Bearer <your-shared-token>` |
 
-### Select a JDK
+The URL changes when `server.port` or `spring.ai.mcp.server.streamable-http.mcp-endpoint` changes. HTTP launchers force HTTP mode. Linux launchers require Bash 4.4+, `flock`, `setsid`, `readlink`, and `ss`.
 
-HTTP scripts accept `--java-home=<absolute JDK directory or environment-variable name>`. Alternatively, set `$CustomJavaHome` in PowerShell or `CUSTOM_JAVA_HOME` in Bash to either form. Selection order is the command-line setting, script setting, `OMNI_JAVA_HOME`, `JAVA_HOME`, then PATH. An explicitly named environment variable must exist. Java 25+ is checked before an existing service is stopped. Paths containing spaces must be quoted.
+On Windows, double-click `omni-connect.cmd` for the command menu. Up/Down or 1/2/3 select Start/Stop/Restart; Enter executes the selection. Restart is selected initially. Five seconds without keyboard input executes the selected command.
+
+To select a JDK, set `OMNI_JAVA_HOME` or `JAVA_HOME`, or pass an absolute JDK directory or environment-variable name to the HTTP launcher:
 
 ```powershell
-.\omni-connect.cmd restart --java-home=JDK25
+.\omni-connect.cmd start --java-home=JDK25
 .\omni-connect.cmd restart "--java-home=C:\Program Files\Java\jdk-25.0.1"
 ```
 
-## Stdio and multiple processes
+### Stdio
 
-The same JAR and YAML support HTTP and any number of stdio processes simultaneously. Each stdio client must own its child's stdin/stdout. A stdio process never opens an HTTP port, uses no HTTP Bearer token, and exits after stdin EOF. Diagnostic output goes to stderr and PID-specific files under `log/`; stdout contains MCP messages only.
+Let the MCP client launch and own the process. For clients that accept a `mcpServers` JSON configuration, use an entry such as:
 
 ```json
 {
   "mcpServers": {
-    "omni-stdio": {
+    "omni_connect_stdio": {
       "command": "C:/Program Files/Java/jdk-25.0.1/bin/java.exe",
       "args": [
-        "-jar", "E:/deploy/omni/omni-connect-mcp.jar",
-        "--spring.config.location=file:E:/deploy/omni/application.yml",
+        "-jar", "E:/deploy/omni-connect-mcp/omni-connect-mcp.jar",
+        "--spring.config.location=file:E:/deploy/omni-connect-mcp/application.yml",
         "--spring.ai.mcp.server.stdio=true"
       ]
     }
@@ -72,69 +85,379 @@ The same JAR and YAML support HTTP and any number of stdio processes simultaneou
 }
 ```
 
-Register multiple entries with distinct names to start multiple children. Optional `omni-connect-stdio.cmd` / `omni-connect-stdio` wrappers also support a script-level JDK environment-variable name or absolute directory. They inherit the protocol streams and use the adjacent YAML. On Unix, run the wrapper with `sh /absolute/path/omni-connect-stdio` or mark it executable.
+Client configuration formats vary; the executable and arguments above can also be entered in clients with dedicated stdio settings. On Linux, use the installed Java executable and Linux deployment paths. Optional stdio wrappers are `omni-connect-stdio.cmd` on Windows and `omni-connect-stdio` on Linux. They load the YAML beside the JAR.
 
-Each process owns independent connection state, Redis database selection, JDBC pools, transactions, and token caches. Runtime changes affect all MCP sessions within that process only. Shared upstream data remains shared. HTTP stop/restart never manages stdio processes.
+Stdio opens no HTTP port and uses no HTTP Bearer token. Standard output carries MCP messages only; diagnostics go to stderr and PID-specific files under `log/`. Closing stdin terminates the process.
 
-## Connections and tool discovery
+An HTTP service and multiple stdio processes can run simultaneously. Each process has independent connection state; all sessions within one process share its current connections. HTTP launchers do not stop client-owned stdio processes.
 
-All four YAML `enabled` flags default to `false`. They control startup activation; they do not prohibit later agent activation. Disabled connections require no address or credentials and create no upstream resources. `convert_config` always works offline.
+## Configure application.yml
 
-Six tools are initially visible: `connector_status`, `apollo_connect`, `nacos_connect`, `db_switch_datasource`, `redis_connect`, and `convert_config`. Activation adds business tools to the existing server and sends tool-list change notifications. Refresh the client's tools, or reconnect if it does not refresh automatically. All connections active exposes 26 tools, preserving the original 22 business/switch/conversion tools.
+The YAML is external and is not embedded in the JAR. The launchers load the adjacent file; when launching Java directly, specify `--spring.config.location=file:/absolute/path/application.yml`.
 
-| Connection tool | Required parameters | Optional parameters |
-| --- | --- | --- |
-| `apollo_connect` | `meta`, `appId` | `cluster`, `namespace`, `fileType`, `accessKey`, `portalUrl`, `openapiToken`, `env`, `operator`, `releasedBy` |
-| `nacos_connect` | `serverAddr` | `contextPath`, `username`, `password`, `namespace`, `group`, `fileType` |
-| `db_switch_datasource` | `jdbcUrl`, `username`, `password` | `schema` |
-| `redis_connect` | `host` | `port`, `username`, `password`, `database` |
+The following is the complete example configuration shipped with this project. `${VARIABLE:default}` reads an environment variable and uses the value after `:` when it is absent. Supply real connection values through environment variables or your deployment's YAML.
 
-Runtime configuration is memory-only and never rewrites YAML. Omitted connection fields use type defaults, not previous credentials. Failed validation leaves the current connection usable. Apollo probes a published default namespace; Nacos probes namespace discovery; JDBC validates the candidate pool; Redis uses PING. Portal item permissions are validated when used. Startup preserves lazy access for Apollo/Nacos/Redis; enabled JDBC must validate before startup succeeds. Status reports activation, not continuous upstream health. Runtime disable is outside this version.
-
-## Configuration migration
-
-Nacos namespace discovery first uses `/v2/console/namespace/list` (response code `0`). When that endpoint returns HTTP 404, it retries the read through `/v1/console/namespaces` (response code `200`) for older servers. Authentication failures, server errors, and malformed responses do not trigger version fallback. Configuration reads and publication continue to use `/v1/cs/configs`. This compatibility covers the V1/V2 APIs; Nacos 3.x console APIs are not covered.
-
-| Previous prefix | New prefix |
-| --- | --- |
-| `migrate.http` | `omni.config.http` |
-| `migrate.from.apollo` | `omni.config.apollo` |
-| `migrate.to.nacos` | `omni.config.nacos` |
-| `dbmcp.auth` | `omni.auth` |
-| `dbmcp.database` | `omni.jdbc.connection` |
-| `dbmcp.switch`, `dbmcp.query`, `dbmcp.transaction`, `dbmcp.write` | Corresponding children under `omni.jdbc` |
-| `spring.data.redis` | `omni.redis.connection` |
-| `dbmcp.redis` | `omni.redis.limits` |
-
-Old aliases are not supported. Standard `spring.*` and `server.*` keys retain their normal meaning. Conversion defaults use the YAML Apollo/Nacos file types, falling back to properties/YAML even if those providers are inactive. Credentials in the checked-in YAML are empty environment placeholders; keep deployment secrets private.
-
-## Modules and extension
-
-`omni-connect-core` owns shared transport, authentication, connector lifecycle, and tool registration. `omni-connect-config`, `omni-connect-jdbc`, and `omni-connect-redis` own their protocols and business logic. `omni-connect-app` assembles the runnable application. Every module uses group ID `xyz.fz` and packages under `xyz.fz.omni`.
-
-To add MQ later, create a new module depending on core, implement `ConnectorModule`, expose its typed management endpoint, and publish validated `ConnectorRegistry.Target` instances with their tool specifications and cleanup callback. Add the module dependency to the application and rebuild the same executable JAR. Business modules must not depend on one another. This version includes no MQ implementation or runtime plugin loading.
-
-Read [AGENT_GUIDE.md](AGENT_GUIDE.md) for tool semantics and recovery. Tests use local HTTP peers, H2 only in test scope, and a controlled Redis fixture; they do not establish compatibility with private production services. The retained Postman simulation under `postman/` is optional and is not needed for the default test suite.
-
-## Verification
-
-### GitHub Actions
-
-Pushing a tag beginning with `v` (for example, `v0.1.0`) triggers `.github/workflows/tag-build.yml`. Branch pushes and pull requests do not trigger this workflow. The Ubuntu runner installs Temurin JDK 25, runs `mvn clean verify -DskipTests=false`, exercises the runnable JAR and launchers, and creates two distribution archives. After successful verification and artifact upload, it publishes a GitHub Release for the existing tag with generated release notes and attaches both archives. Rerunning the workflow replaces attachments with the same names. The workflow uses the built-in `GITHUB_TOKEN` with `contents: write`; no additional token or private service credentials are needed. Actions artifacts are retained for 30 days and failure diagnostics for 7 days; Release attachments are independent of artifact retention.
-
-| Artifact | Archive | Contents under `omni-connect-mcp/` |
-| --- | --- | --- |
-| `omni-connect-mcp-<tag>-windows` | `omni-connect-mcp-<tag>-windows.zip` | Runnable JAR, example `application.yml`, `omni-connect.cmd`, `omni-connect.ps1`, `omni-connect-stdio.cmd`, `omni-connect-stdio.ps1` |
-| `omni-connect-mcp-<tag>-linux` | `omni-connect-mcp-<tag>-linux.tar.gz` | Runnable JAR, example `application.yml`, `omni-connect.sh`, `omni-connect-stdio` |
-
-Linux launchers have executable permissions in the tar archive. Both packages require an installed JDK 25+; neither bundles a JDK. Download the named platform archives directly from the [Releases page](https://github.com/frankzhang89/omni-connect-mcp/releases). GitHub's automatically generated `Source code` archives contain repository source, not the runnable application. Actions artifacts remain available as a secondary download; GitHub wraps each in its own download ZIP. Local Maven packaging still exports only the runnable JAR. To create both archives locally after building, run `python scripts/package_release.py v0.1.0`; outputs appear under `target/dist/`.
-
-Commit the intended source first, then create and push its tag:
-
-```bash
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin main
-git push origin v0.1.0
+```yaml
+# The only deployment configuration; runtime connections never modify this file.
+spring:
+  application:
+    name: omni-connect-mcp
+  ai:
+    mcp:
+      server:
+        name: omni-connect-mcp
+        version: 0.1.0
+        stdio: false
+        protocol: STREAMABLE
+        type: SYNC
+        annotation-scanner:
+          enabled: false
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /mcp
+        instructions: >-
+          Use connector_status and the connection tools to activate capabilities.
+          Connections are shared by this process, memory-only, and reset on restart.
+          Refresh tools after activation. Nacos publication replaces the entire document
+          without conversion. Apollo item updates publish by default. Read before editing
+          and verify writes. Never blindly retry an unknown write outcome. Use the
+          connected database dialect. Explicit transactions belong to their MCP session
+          and retain their original data source across switches. Read AGENT_GUIDE.md.
+server:
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  port: ${SERVER_PORT:8285}
+omni:
+  auth:
+    enabled: true
+    # Set a real token before HTTP startup. Stdio does not use HTTP authentication.
+    token: ${OMNI_AUTH_TOKEN:}
+  config:
+    http:
+      connect-timeout: 3s
+      read-timeout: 10s
+    apollo:
+      enabled: false
+      meta: ${APOLLO_META:}
+      app-id: ${APOLLO_APP_ID:}
+      cluster: default
+      namespace: application
+      file-type: properties
+      access-key: ${APOLLO_ACCESS_KEY:}
+      portal-url: ${APOLLO_PORTAL_URL:}
+      openapi-token: ${APOLLO_OPENAPI_TOKEN:}
+      env: ${APOLLO_ENV:}
+      operator: ${APOLLO_OPERATOR:}
+      released-by: ${APOLLO_RELEASED_BY:}
+    nacos:
+      enabled: false
+      server-addr: ${NACOS_SERVER_ADDR:}
+      context-path: /nacos
+      username: ${NACOS_USERNAME:}
+      password: ${NACOS_PASSWORD:}
+      namespace: ""
+      group: DEFAULT_GROUP
+      file-type: yaml
+  jdbc:
+    enabled: false
+    connection:
+      url: ${JDBC_URL:}
+      username: ${JDBC_USERNAME:}
+      password: ${JDBC_PASSWORD:}
+      max-active: 3
+      min-idle: 0
+      connection-timeout: 5000
+    switch:
+      timeout-seconds: 15
+      validation-timeout-seconds: 5
+    query:
+      max-rows: 100
+      timeout-seconds: 10
+      max-cell-chars: 4000
+    write:
+      allow-ddl: true
+    transaction:
+      idle-timeout-seconds: 120
+      max-lifetime-seconds: 600
+      max-active: 5
+      max-statements: 20
+      max-sql-chars: 20000
+      script-timeout-seconds: 30
+  redis:
+    enabled: false
+    connection:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+    limits:
+      max-databases: 16
+      max-scan-count: 100
+      max-items: 100
+      max-value-chars: 4000
 ```
 
-`mvn clean verify -DskipTests=false` runs the unit and application tests and exports the runnable JAR. Tests are skipped by default through the parent POM property. Test-only H2 is not bundled. To exercise the actual exported JAR, HTTP lifecycle scripts, authentication, a Windows stdio wrapper, and concurrent stdio children, run `python tests/test_release.py` with `JAVA_HOME` pointing to JDK 25. The release smoke test combines the exported JAR with configuration and launchers from the project root in its own deployment under `target/`, uses an ephemeral HTTP port, and stops only the process it launched. On Unix it exercises the corresponding shell wrappers; run that check on a Unix host with the documented utilities installed.
+### Connection and execution settings
+
+| YAML section | Configuration |
+| --- | --- |
+| `omni.auth` | HTTP authentication. `enabled: true` requires a nonempty `token`; clients send it as a Bearer token. Stdio does not require it. |
+| `omni.config.http` | Apollo/Nacos connection and read timeouts, expressed as durations such as `3s`. |
+| `omni.config.apollo` | Set `enabled: true`, `meta`, and `app-id` for startup activation. Published reads use `cluster`, `namespace`, `file-type`, and optional signing `access-key`. Item operations additionally require `portal-url`, `openapi-token`, and `env`; updates require an operator. |
+| `omni.config.nacos` | Set `enabled: true` and `server-addr` for startup activation. Use one origin such as `http://nacos.example.com:8848`; set `context-path` separately, normally `/nacos`. Supply credentials when authentication is enabled. `namespace` is an ID; empty string or `public` selects public. `group` and `file-type` provide operation defaults. |
+| `omni.jdbc` | Set `enabled: true` and connection URL/credentials for startup activation. The JDBC driver is selected from the URL. `max-active` and `min-idle` control the pool; `connection-timeout` is in milliseconds. |
+| `omni.jdbc.query` | Result row limit, query timeout in seconds, and maximum returned characters per cell. |
+| `omni.jdbc.switch` | Candidate connection and validation timeouts in seconds. |
+| `omni.jdbc.write` | `allow-ddl` enables or blocks DDL. The shipped value is `true`; set it to `false` to block the DDL tool. DML remains available subject to database permissions. |
+| `omni.jdbc.transaction` | Idle/lifetime/script timeouts in seconds, concurrent transaction limit, and SQL/statement limits. |
+| `omni.redis` | Set `enabled: true` with `connection.host`, `port`, optional credentials, and `database` for startup activation. Keep host and port separate. `limits` bounds database indices, scans, returned items, and value length. |
+
+For example, a MySQL URL is `jdbc:mysql://mysql.example.com:3306/example?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC`. Set `JDBC_URL`, `JDBC_USERNAME`, and `JDBC_PASSWORD`, then change `omni.jdbc.enabled` to `true` to connect at startup.
+
+All four connectors are disabled in the example YAML. Their `enabled` flags control startup activation, not whether an agent may connect later. JDBC validates its configured connection during startup; Apollo, Nacos, and Redis initialize without a startup connectivity probe. Runtime connection tools validate their candidate before replacing the active connection.
+
+## Connection lifecycle and tool discovery
+
+There are **26 tools** when all connectors are active. With every connector disabled, these six remain available:
+
+`connector_status`, `apollo_connect`, `nacos_connect`, `db_switch_datasource`, and `redis_connect`, plus the offline `convert_config` tool.
+
+1. Call `connector_status` to inspect active connectors.
+2. Activate the required connector using its connection tool and your connection parameters.
+3. Have the MCP client refresh `tools/list` to discover the business tools, then call them.
+
+Activation sends tool-list change notifications. Some clients cache the initial tool list and do not expose newly registered tools to the agent automatically. A successful connection or `connector_status` response does not prove that the client refreshed its callable tools. Check the actual `tools/list` response. Reconnecting to an HTTP service preserves the connection if that service stays running; restarting a stdio process resets its state, so runtime activation must be repeated. Clients that only discover tools at startup can use YAML startup activation; runtime registration occurs during application startup, so startup timing should also be considered.
+
+Runtime connection changes are process-wide, memory-only, and never saved to YAML. A process restart restores YAML settings. HTTP and stdio connections do not configure one another. Omitted optional fields use defaults rather than credentials from the previous connection. Failed candidate validation leaves the previous connection available. Runtime disabling is not provided. Status reports activation, not a continuous health check.
+
+## Tool reference
+
+Parameter names in tool calls use camelCase; YAML configuration uses kebab-case. The tables below list required parameters first, followed by optional parameters. The MCP client's discovered input schema is the full parameter contract.
+
+### Shared tools
+
+| Tool | Parameters | Behavior |
+| --- | --- | --- |
+| `connector_status` | None | Returns activation state, configuration source, and registered tool names for each connector; omits addresses and credentials. |
+| `convert_config` | Required: `content`. Optional: `sourceType`, `targetType`. | Offline properties/YAML conversion. Supports `properties`, `yaml`, and `yml`; same-format conversion validates and preserves content. Explicit formats avoid depending on provider defaults. |
+
+### Apollo
+
+| Tool | Parameters | Behavior |
+| --- | --- | --- |
+| `apollo_connect` | Required: `meta`, `appId`. Optional: `cluster`, `namespace`, `fileType`, `accessKey`, `portalUrl`, `openapiToken`, `env`, `operator`, `releasedBy`. | Validates a published namespace and activates/replaces Apollo. Defaults: cluster `default`, namespace `application`, format `properties`. Portal permissions are checked by item operations. |
+| `apollo_read_config` | Optional: `appId`, `cluster`, `namespace`, `fileType`. | Reads published content with location, release key, and SHA-256. Omitted identifiers use active connection defaults. |
+| `apollo_read_item` | Required: `key`. Optional: `appId`, `cluster`, `namespace`, `fileType`, `env`. | Reads a properties item's current editing value, comment, and metadata through Portal OpenAPI; it may differ from the published value. |
+| `apollo_update_config` | Required: `key`, `value`. Optional: `appId`, `cluster`, `namespace`, `fileType`, `env`, `publish`, `operator`, `releasedBy`, `releaseTitle`, `releaseComment`. | Updates an existing properties item to the complete supplied value and preserves its comment. Publishes by default; `publish: false` only saves the editing value. |
+
+For published YAML reads, missing namespace suffixes are appended according to `fileType`; `.yaml` and `.yml` are significant. Item read/update tools support properties namespaces only. Before updating part of a value, read the full item and preserve everything that should remain. Publication can include a namespace's changes; the tool checks for other unpublished edits, but those checks and publication are not atomic.
+
+### Nacos
+
+| Tool | Parameters | Behavior |
+| --- | --- | --- |
+| `nacos_connect` | Required: `serverAddr`. Optional: `contextPath`, `username`, `password`, `namespace`, `group`, `fileType`. | Validates namespace discovery and activates/replaces Nacos. Defaults: context `/nacos`, public namespace, group `DEFAULT_GROUP`, format `yaml`. |
+| `nacos_list_namespaces` | None | Lists namespace IDs, display names, and configuration counts. |
+| `nacos_list_and_count_data_ids` | Optional: `namespace`, `group`. | Lists all data IDs and their total count for exactly one namespace/group, following all pages. |
+| `nacos_read_config` | Required: `dataId`. Optional: `group`, `namespace`, `fileType`. | Reads unchanged content and SHA-256. `dataId` is exact: no suffix is inferred or added. |
+| `nacos_publish_config` | Required: `dataId`, `content`. Optional: `group`, `namespace`, `fileType`. | Creates or replaces the entire document. Content must already match `fileType`; publication never converts it. |
+
+Namespace discovery tries the V2 API first and falls back to V1 only when V2 returns HTTP 404. Authentication errors and malformed responses do not trigger fallback. This covers Nacos V1/V2 APIs, not the separate Nacos 3.x console APIs.
+
+### JDBC
+
+| Tool | Parameters | Behavior |
+| --- | --- | --- |
+| `db_switch_datasource` | Required: `jdbcUrl`, `username`, `password`. Optional: `schema`. | Validates a candidate JDBC connection and switches the process-wide target. Also activates JDBC when initially disabled. |
+| `db_list_tables` | None | Lists up to 500 tables/views with available comments and catalog/schema information. |
+| `db_describe_table` | Required: `tableName`. Optional: `schemaName`. | Returns columns, types, defaults, comments, primary keys, indexes, foreign keys, and unique constraints where supported. |
+| `db_query` | Required: `sql`. Optional: `parameters`, `maxRows`. | Runs one read-only SELECT or WITH SELECT. Supports ordinary EXPLAIN SELECT on MySQL, PostgreSQL, and StarRocks. |
+| `db_execute_dml` | Required: `sql`. Optional: `parameters`. | Executes one INSERT, UPDATE, DELETE, MERGE, or UPSERT supported by the database; returns affected rows and supported generated keys. Executes independently of explicit transaction handles. |
+| `db_execute_ddl` | Required: `sql`. | Executes one CREATE, ALTER, DROP, TRUNCATE, or RENAME statement when DDL is enabled. |
+| `db_execute` | Required: `sql`. Optional: `transactionId`. | Opens an explicit transaction with `BEGIN`, executes SQL on its retained connection, and closes it with `COMMIT` or `ROLLBACK`. |
+
+Use the connected database's SQL dialect. `db_query` and `db_execute_dml` bind values with `?` placeholders and `parameters`. Neither RETURNING nor OUTPUT is supported by the DML tool. `db_query` rejects writes, locking clauses, EXPLAIN ANALYZE, and EXPLAIN options. Oracle/SQL Server estimated plans use `db_execute` instead.
+
+Explicit transactions belong to their MCP session and require `db_execute` for every statement; the other query/DML tools do not participate in them. Pass the ID returned by `BEGIN` on subsequent calls. Existing transactions retain their original data source across switches. Execution errors require rollback. StarRocks does not support opening these explicit transactions. Transaction scripts allow SELECT, supported EXPLAIN, DML, and TRUNCATE; other DDL and session-control statements are rejected. MySQL/Oracle TRUNCATE can implicitly commit and cannot be treated as rollback-safe.
+
+### Redis
+
+| Tool | Parameters | Behavior |
+| --- | --- | --- |
+| `redis_connect` | Required: `host`. Optional: `port`, `username`, `password`, `database`. | Uses PING to validate and activate/replace a standalone Redis connection. Defaults: port `6379`, database `0`. |
+| `redis_scan_keys` | Optional: `pattern`, `cursor`, `count`. | Uses SCAN to page through matching keys. Start with cursor `"0"` and continue using `nextCursor`. |
+| `redis_inspect_key` | Required: `key`. | Returns existence, type, TTL, and size without changing data. |
+| `redis_read_key` | Required: `key`. Optional: `maxItems`. | Reads bounded string/list/set/hash/zset content. |
+| `redis_write_key` | Required: `key`, `type`, and the value field appropriate for the type. Optional: `ttlSeconds`. | Writes one key. Use `value` for string; `values` for list/set; `fields` for hash; `scoreMembers` for zset. |
+| `redis_delete_keys` | Required: `keys`. | Deletes up to 100 supplied keys and returns the removed count. |
+| `redis_expire_key` | Required: `key`, `ttlSeconds`. | Sets expiry; `0` removes expiry with PERSIST rather than deleting the key. |
+| `redis_select_db` | Required: `db`. | Changes the Redis logical database for all sessions in this process. |
+
+Lists append to the tail, sets add members, hashes merge fields, and sorted sets add/update member scores. Supply a positive `ttlSeconds` to `redis_write_key` to set expiry. Keep the logical database stable during a multi-page scan. Redis Cluster and Sentinel connection modes are not provided.
+
+## Calling tools
+
+The examples below are the `params` object of an MCP `tools/call` request. Pass `name` and `arguments` through your MCP client after initialization; these are not REST endpoints. For example, a full protocol request looks like:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"connector_status","arguments":{}}}
+```
+
+### Apollo: connect, then read
+
+```json
+{"name":"apollo_connect","arguments":{"meta":"http://apollo.example.com:8080","appId":"example-app","cluster":"default","namespace":"application","fileType":"properties"}}
+```
+
+```json
+{"name":"apollo_read_config","arguments":{}}
+```
+
+For item operations, include Portal settings in `apollo_connect`: `portalUrl`, `openapiToken`, `env`, and `operator`, plus `releasedBy` when a separate publisher is required. Then read the existing item before changing it:
+
+```json
+{"name":"apollo_read_item","arguments":{"key":"service.url"}}
+```
+
+```json
+{"name":"apollo_update_config","arguments":{"key":"service.url","value":"https://api.example.com/v2","publish":false}}
+```
+
+### Nacos: discover, read, then publish
+
+```json
+{"name":"nacos_connect","arguments":{"serverAddr":"http://nacos.example.com:8848","username":"example-user","password":"<password>","namespace":"example-namespace-id","group":"EXAMPLE_GROUP","fileType":"yaml"}}
+```
+
+```json
+{"name":"nacos_list_namespaces","arguments":{}}
+```
+
+```json
+{"name":"nacos_list_and_count_data_ids","arguments":{"namespace":"example-namespace-id","group":"EXAMPLE_GROUP"}}
+```
+
+```json
+{"name":"nacos_read_config","arguments":{"dataId":"example.yaml"}}
+```
+
+Publish only after reviewing the complete replacement document, then read it back:
+
+```json
+{"name":"nacos_publish_config","arguments":{"dataId":"example.yaml","content":"app:\n  name: example\n","fileType":"yaml"}}
+```
+
+To convert formats explicitly before publishing:
+
+```json
+{"name":"convert_config","arguments":{"content":"app.name=example\n","sourceType":"properties","targetType":"yaml"}}
+```
+
+### JDBC: connect and query
+
+```json
+{"name":"db_switch_datasource","arguments":{"jdbcUrl":"jdbc:mysql://mysql.example.com:3306/example?serverTimezone=UTC","username":"example-user","password":"<password>"}}
+```
+
+```json
+{"name":"db_list_tables","arguments":{}}
+```
+
+```json
+{"name":"db_describe_table","arguments":{"tableName":"example_items"}}
+```
+
+```json
+{"name":"db_query","arguments":{"sql":"SELECT id, name FROM example_items WHERE id = ?","parameters":[1],"maxRows":10}}
+```
+
+The following DML assumes the example table already exists and independently applies the change:
+
+```json
+{"name":"db_execute_dml","arguments":{"sql":"UPDATE example_items SET name = ? WHERE id = ?","parameters":["updated",1]}}
+```
+
+To control the transaction instead, use the same MCP session for all these calls. Replace `<transaction-id>` with the ID returned by `BEGIN`; `db_execute` accepts SQL literals, not a `parameters` array:
+
+```json
+{"name":"db_execute","arguments":{"sql":"BEGIN"}}
+```
+
+```json
+{"name":"db_execute","arguments":{"sql":"UPDATE example_items SET name = 'temporary' WHERE id = 1","transactionId":"<transaction-id>"}}
+```
+
+```json
+{"name":"db_execute","arguments":{"sql":"ROLLBACK","transactionId":"<transaction-id>"}}
+```
+
+Use `COMMIT` instead of `ROLLBACK` when the changes should be saved. DDL is a separate operation, for example:
+
+```json
+{"name":"db_execute_ddl","arguments":{"sql":"CREATE TABLE example_items (id BIGINT PRIMARY KEY, name VARCHAR(100))"}}
+```
+
+### Redis: connect and write each supported type
+
+```json
+{"name":"redis_connect","arguments":{"host":"redis.example.com","port":6379,"password":"<password>","database":0}}
+```
+
+Each call below writes one example key with a 300-second TTL:
+
+```json
+{"name":"redis_write_key","arguments":{"key":"example:string","type":"string","value":"hello","ttlSeconds":300}}
+```
+
+```json
+{"name":"redis_write_key","arguments":{"key":"example:list","type":"list","values":["hello"],"ttlSeconds":300}}
+```
+
+```json
+{"name":"redis_write_key","arguments":{"key":"example:set","type":"set","values":["hello"],"ttlSeconds":300}}
+```
+
+```json
+{"name":"redis_write_key","arguments":{"key":"example:hash","type":"hash","fields":{"message":"hello"},"ttlSeconds":300}}
+```
+
+```json
+{"name":"redis_write_key","arguments":{"key":"example:zset","type":"zset","scoreMembers":{"hello":1.5},"ttlSeconds":300}}
+```
+
+Read back a value, check its TTL, or scan the example keys:
+
+```json
+{"name":"redis_read_key","arguments":{"key":"example:hash"}}
+```
+
+```json
+{"name":"redis_inspect_key","arguments":{"key":"example:hash"}}
+```
+
+```json
+{"name":"redis_scan_keys","arguments":{"pattern":"example:*","cursor":"0","count":100}}
+```
+
+## Errors and write verification
+
+Check tool results for `isError`, `success`, and any returned error code before continuing. Connection success does not prove that every operation is authorized by the upstream service. Read configurations before replacing them and read back after publication to verify the returned content/hash. On `WRITE_RESULT_UNKNOWN`, inspect the target before retrying: the write may already have completed. On an uncertain transaction commit/rollback, inspect database state rather than replaying the write.
+
+See [AGENT_GUIDE.md](AGENT_GUIDE.md) for detailed transaction, publication, and recovery rules.
+
+## Build from source
+
+Select JDK 25 and run Maven 3.6.3+ recursively from the project root:
+
+```powershell
+mvn clean package
+mvn clean package '-Dbase.export.path=E:/opt/packaging'
+```
+
+The default export is `target/release/omni-connect-mcp/omni-connect-mcp.jar`; the second command exports it to `E:/opt/packaging/omni-connect-mcp/omni-connect-mcp.jar`. Maven exports only the runnable JAR. Copy the example YAML and required platform launchers separately when assembling a deployment from a local build. Intermediate artifacts remain in module `target/` directories. Disable the IntelliJ Maven **Non-recursive** option; `-N` builds only the root aggregator.
+
+Tests are skipped by default. Run `mvn clean verify -DskipTests=false` to execute them and `python tests/test_release.py` with `JAVA_HOME` set to JDK 25 to exercise the packaged JAR and launchers.
