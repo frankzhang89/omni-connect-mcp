@@ -174,7 +174,10 @@ public final class ConfigConnectorModule implements ConnectorModule {
                 var tools = specs(props, List.of(store), "nacos_");
                 if (probe) store.listNamespaces();
                 return registry.activate(
-                        id(), source, new ConnectorRegistry.Target(tools, http::close));
+                        id(),
+                        source,
+                        new ConnectorRegistry.Target(
+                                tools, http::close, Map.of("version", store.version())));
             } catch (RuntimeException e) {
                 http.close();
                 throw e;
@@ -184,8 +187,10 @@ public final class ConfigConnectorModule implements ConnectorModule {
         @McpTool(
                 name = "nacos_connect",
                 description =
-                        "Activate or replace the process-wide Nacos connection after a read-only"
-                            + " namespace query. Memory-only; no publication or YAML changes.",
+                        "Activate or replace the process-wide Nacos connection after detecting the"
+                            + " server version and validating a read-only namespace query. Returns"
+                            + " version; subsequent operations use its cached API selection. Nacos"
+                            + " 3.x uses Admin APIs. Memory-only; no publication or YAML changes.",
                 annotations =
                         @McpTool.McpAnnotations(
                                 readOnlyHint = false,

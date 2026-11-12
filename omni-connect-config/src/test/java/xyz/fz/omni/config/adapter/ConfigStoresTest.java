@@ -25,18 +25,18 @@ class ConfigStoresTest {
     @Test
     void nacosUsesV2NamespacesWithoutLegacyRequest() {
         assertThat(service.nacosListNamespaces().namespaces())
-                .extracting(NamespaceInfo::namespace).containsExactly("", "empty-ns");
+                .extracting(NamespaceInfo::namespace)
+                .containsExactly("", "empty-ns");
         assertThat(upstream.namespaceV2Reads).hasValue(1);
         assertThat(upstream.namespaceV1Reads).hasValue(0);
     }
 
     @Test
-    void nacosFallsBackToV1NamespacesWhenV2IsMissing() {
+    void nacosDoesNotFallbackToV1WhenTheSelectedV2ApiIsMissing() {
         upstream.namespaceV2Status = 404;
-        assertThat(service.nacosListNamespaces().namespaces())
-                .extracting(NamespaceInfo::namespace).containsExactly("", "empty-ns");
+        assertThatThrownBy(service::nacosListNamespaces).hasMessageContaining("NOT_FOUND");
         assertThat(upstream.namespaceV2Reads).hasValue(1);
-        assertThat(upstream.namespaceV1Reads).hasValue(1);
+        assertThat(upstream.namespaceV1Reads).hasValue(0);
         assertThat(upstream.logins).hasValue(1);
     }
 
@@ -49,14 +49,16 @@ class ConfigStoresTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {
-        "{\"code\":0,\"data\":[]}",
-        "{\"code\":200,\"data\":{}}",
-        "{\"code\":200,\"data\":[{\"namespace\":\"x\"}]}",
-        "{\"code\":200,\"data\":[{\"namespace\":\"x\",\"namespaceShowName\":\"X\",\"configCount\":-1}]}"
-    })
+    @org.junit.jupiter.params.provider.ValueSource(
+            strings = {
+                "{\"code\":0,\"data\":[]}",
+                "{\"code\":200,\"data\":{}}",
+                "{\"code\":200,\"data\":[{\"namespace\":\"x\"}]}",
+                "{\"code\":200,\"data\":[{\"namespace\":\"x\",\"namespaceShowName\":\"X\",\"configCount\":-1}]}"
+            })
     void nacosValidatesLegacyResponse(String body) {
-        upstream.namespaceV2Status = 404;
+        upstream.nacosVersion = "1.4.8";
+        service = service(Duration.ofSeconds(2));
         upstream.namespaceBody = body;
         assertThatThrownBy(service::nacosListNamespaces).hasMessageContaining("UPSTREAM_ERROR");
     }

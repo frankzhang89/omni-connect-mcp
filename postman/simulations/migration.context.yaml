@@ -1,6 +1,6 @@
 purpose:
-  stands_in_for: Apollo and Nacos 2.x HTTP APIs
-  unblocks: Local MCP migration and Nacos discovery checks
+  stands_in_for: Apollo and Nacos 1.x/2.x/3.x HTTP APIs
+  unblocks: Local MCP configuration operations, Nacos version detection and fixed API routing checks
 assumptions:
   - id: nacos-namespace-list
     status: supported
@@ -16,4 +16,18 @@ assumptions:
     verification: Local HTTP fixture tests cover zero results, group and namespace isolation, and the complete list across two pages. These checks passed again on 2026-11-11 after migration into omni-connect-config and omni-connect-app; no Postman simulation or live provider was exercised.
     source: https://github.com/alibaba/nacos/blob/2.4.3/config/src/main/java/com/alibaba/nacos/config/server/controller/ConfigController.java#L373-L398
     updated_at: "2026-11-11"
+  - id: nacos-version-detection-and-routing
+    status: supported
+    claim: The connector detects a server version during each activation and reuses that instance's API selection without probing or downgrading business requests.
+    reason: Official 1.4.8 and 2.4.3 state controllers expose version at the top level; the 3.0.0 Admin state controller wraps its state in a successful Result. Namespace V2 starts at 2.2.0. Local caller tests exercise these contracts.
+    verification: On 2026-11-13, NacosVersionsTest passed against local HTTP peers, and NacosSimulationTest passed with the real MCP server and HTTP client against the checked-in Postman simulation for 1.4.8, 2.0.0, 2.1.2, 2.2.0, 2.4.3, 3.0.0 and 3.2.0. Request records verified one V3 state request per activation, one V1 state request only for older servers, and no state requests during subsequent operations. A simulated state HTTP 500 preserved the prior connection; business HTTP 404 and publish HTTP 503 generated only their selected V3 requests. This establishes caller behavior against these stand-ins, not exhaustive live-server compatibility. No signed-in Postman owner search was available; existing local mocks were extended using official sources.
+    source: https://github.com/alibaba/nacos/blob/1.4.8/console/src/main/java/com/alibaba/nacos/console/controller/ServerStateController.java; https://github.com/alibaba/nacos/blob/2.2.0/console/src/main/java/com/alibaba/nacos/console/controller/v2/NamespaceControllerV2.java; https://github.com/alibaba/nacos/blob/3.0.0/core/src/main/java/com/alibaba/nacos/core/controller/v3/ServerStateController.java
+    updated_at: "2026-11-13"
+  - id: nacos-v3-admin-config-contract
+    status: supported
+    claim: Nacos 3.x configuration operations use server Admin APIs with namespaceId and groupName, token headers and successful JSON envelopes.
+    reason: The official 3.0.0 ConfigControllerV3 and Admin API documentation specify the selected endpoints and response types; the mock rejects legacy identity fields or token placement for V3 configuration operations.
+    verification: On 2026-11-13, local NacosVersionsTest covered public and custom namespaces, exact group filtering, pagination, unchanged content and SHA-256, token refresh, and publication acknowledgements. NacosSimulationTest drove publish/read/list and namespace discovery for 3.0.0 and 3.2.0 through the actual MCP transport and Postman simulation; simulation request logs showed the V3 Admin paths. No real Nacos server or custom authentication plugin was exercised.
+    source: https://github.com/alibaba/nacos/blob/3.0.0/config/src/main/java/com/alibaba/nacos/config/server/controller/v3/ConfigControllerV3.java; https://nacos.io/docs/latest/manual/admin/admin-api/; postman/mocks/nacos/default.js
+    updated_at: "2026-11-13"
 fingerprints: []

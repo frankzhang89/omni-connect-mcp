@@ -20,6 +20,169 @@ import java.util.*;
 class RuntimeConnectionsTest {
     private static final JsonMapper JSON = new JsonMapper();
 
+    @Test
+    void nacosVersionIsSharedAndReplacedAtomicallyAcrossHttpSessions() throws Exception {
+        try (var old = new UpstreamFixture();
+                var newer = new UpstreamFixture();
+                var context =
+                        start(
+                                "--omni.config.nacos.enabled=false",
+                                "--omni.config.nacos.server-addr=" + old.base());
+                var first = client(context);
+                var second = client(context)) {
+            newer.nacosVersion = "3.2.0";
+            assertEquals(0, old.stateV3Reads.get());
+            assertEquals(0, old.stateV1Reads.get());
+            assertFalse(call(first, "connector_status", Map.of()).path("nacos").has("version"));
+            var connected =
+                    call(
+                            first,
+                            "nacos_connect",
+                            Map.of(
+                                    "serverAddr",
+                                    old.base(),
+                                    "username",
+                                    "user",
+                                    "password",
+                                    "password"));
+            assertEquals("2.4.3", connected.path("version").asString());
+            call(first, "nacos_publish_config", Map.of("dataId", "a", "content", "key: old"));
+            assertEquals(
+                    "key: old",
+                    call(second, "nacos_read_config", Map.of("dataId", "a"))
+                            .path("content")
+                            .asString());
+            assertEquals(
+                    "2.4.3",
+                    call(second, "connector_status", Map.of())
+                            .path("nacos")
+                            .path("version")
+                            .asString());
+            // A failed version probe cannot replace either the old connection or its metadata.
+            newer.stateBody = "{\"version\":\"4.0.0\"}";
+            var failed =
+                    first.callTool(
+                            new CallToolRequest(
+                                    "nacos_connect", Map.of("serverAddr", newer.base())));
+            assertTrue(failed.isError());
+            assertEquals(
+                    "2.4.3",
+                    call(second, "connector_status", Map.of())
+                            .path("nacos")
+                            .path("version")
+                            .asString());
+            call(second, "nacos_read_config", Map.of("dataId", "a"));
+            newer.stateBody = null;
+            // Namespace validation failure also leaves the old generation intact.
+            newer.namespaceV3Status = 403;
+            failed =
+                    first.callTool(
+                            new CallToolRequest(
+                                    "nacos_connect",
+                                    Map.of(
+                                            "serverAddr",
+                                            newer.base(),
+                                            "username",
+                                            "user",
+                                            "password",
+                                            "password")));
+            assertTrue(failed.isError());
+            assertEquals(
+                    "2.4.3",
+                    call(second, "connector_status", Map.of())
+                            .path("nacos")
+                            .path("version")
+                            .asString());
+            newer.namespaceV3Status = 200;
+            assertEquals(
+                    "3.2.0",
+                    call(
+                                    first,
+                                    "nacos_connect",
+                                    Map.of(
+                                            "serverAddr",
+                                            newer.base(),
+                                            "username",
+                                            "user",
+                                            "password",
+                                            "password"))
+                            .path("version")
+                            .asString());
+            assertEquals(
+                    "3.2.0",
+                    call(second, "connector_status", Map.of())
+                            .path("nacos")
+                            .path("version")
+                            .asString());
+            call(second, "nacos_publish_config", Map.of("dataId", "a", "content", "key: new"));
+            assertEquals(
+                    "key: new",
+                    call(first, "nacos_read_config", Map.of("dataId", "a"))
+                            .path("content")
+                            .asString());
+            try (var third = client(context)) {
+                assertEquals(
+                        "3.2.0",
+                        call(third, "connector_status", Map.of())
+                                .path("nacos")
+                                .path("version")
+                                .asString());
+                call(third, "nacos_read_config", Map.of("dataId", "a"));
+            }
+            assertEquals(1, old.stateV3Reads.get());
+            assertEquals(1, old.stateV1Reads.get());
+            assertEquals(3, newer.stateV3Reads.get());
+            assertEquals(0, newer.stateV1Reads.get());
+        }
+    }
+
+    @Test
+    void yamlDetectsVersionAtStartupAndFailsOnInvalidStateOrMissingAddress() throws Exception {
+        try (var peer = new UpstreamFixture()) {
+            peer.nacosVersion = "3.0.0";
+            try (var context =
+                            start(
+                                    "--omni.config.nacos.enabled=true",
+                                    "--omni.config.nacos.server-addr=" + peer.base(),
+                                    "--omni.config.nacos.username=user",
+                                    "--omni.config.nacos.password=password");
+                    var client = client(context)) {
+                assertEquals(1, peer.stateV3Reads.get());
+                assertEquals(0, peer.namespaceV3Reads.get());
+                assertEquals(
+                        "3.0.0",
+                        call(client, "connector_status", Map.of())
+                                .path("nacos")
+                                .path("version")
+                                .asString());
+                call(client, "nacos_list_namespaces", Map.of());
+                assertEquals(1, peer.stateV3Reads.get());
+            }
+            peer.stateBody = "{}";
+            assertThrows(
+                    RuntimeException.class,
+                    () ->
+                            start(
+                                    "--omni.config.nacos.enabled=true",
+                                    "--omni.config.nacos.server-addr=" + peer.base()));
+            assertThrows(RuntimeException.class, () -> start("--omni.config.nacos.enabled=true"));
+            peer.stateBody = null;
+            try (var context =
+                            start(
+                                    "--omni.config.nacos.enabled=true",
+                                    "--omni.config.nacos.server-addr=" + peer.base());
+                    var client = client(context)) {
+                assertEquals(
+                        "3.0.0",
+                        call(client, "connector_status", Map.of())
+                                .path("nacos")
+                                .path("version")
+                                .asString());
+                assertEquals(3, peer.stateV3Reads.get());
+            }
+        }
+    }
+
     static org.springframework.context.ConfigurableApplicationContext start(String... extra) {
         var args =
                 new ArrayList<>(

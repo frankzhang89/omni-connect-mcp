@@ -207,4 +207,85 @@ class StdioProcessTest {
             child.eof();
         }
     }
+
+    @Test
+    void stdioCachesNacosVersionUntilReplacementAndKeepsItAfterFailedActivation() throws Exception {
+        try (var peer = new xyz.fz.omni.config.support.UpstreamFixture();
+                var child = new Child()) {
+            child.initialize();
+            assertFalse(child.call("connector_status", Map.of()).path("nacos").has("version"));
+            assertEquals(
+                    "2.4.3",
+                    child.call(
+                                    "nacos_connect",
+                                    Map.of(
+                                            "serverAddr",
+                                            peer.base(),
+                                            "username",
+                                            "user",
+                                            "password",
+                                            "password"))
+                            .path("version")
+                            .asString());
+            child.call("nacos_publish_config", Map.of("dataId", "a", "content", "key: value"));
+            child.call("nacos_read_config", Map.of("dataId", "a"));
+            child.call("nacos_list_namespaces", Map.of());
+            assertEquals(
+                    "2.4.3",
+                    child.call("connector_status", Map.of())
+                            .path("nacos")
+                            .path("version")
+                            .asString());
+            assertEquals(1, peer.stateV3Reads.get());
+            assertEquals(1, peer.stateV1Reads.get());
+            peer.stateBody = "{}";
+            var failed =
+                    child.rpc(
+                                    "tools/call",
+                                    Map.of(
+                                            "name",
+                                            "nacos_connect",
+                                            "arguments",
+                                            Map.of("serverAddr", peer.base())))
+                            .path("result");
+            assertTrue(failed.path("isError").asBoolean());
+            assertEquals(
+                    "2.4.3",
+                    child.call("connector_status", Map.of())
+                            .path("nacos")
+                            .path("version")
+                            .asString());
+            child.call("nacos_read_config", Map.of("dataId", "a"));
+            peer.stateBody = null;
+            peer.nacosVersion = "3.0.0";
+            assertEquals(
+                    "3.0.0",
+                    child.call(
+                                    "nacos_connect",
+                                    Map.of(
+                                            "serverAddr",
+                                            peer.base(),
+                                            "username",
+                                            "user",
+                                            "password",
+                                            "password"))
+                            .path("version")
+                            .asString());
+            child.call("nacos_read_config", Map.of("dataId", "a"));
+            assertEquals(
+                    "3.0.0",
+                    child.call("connector_status", Map.of())
+                            .path("nacos")
+                            .path("version")
+                            .asString());
+            assertEquals(3, peer.stateV3Reads.get());
+            assertEquals(2, peer.stateV1Reads.get());
+            child.eof();
+            try (var fresh = new Child()) {
+                fresh.initialize();
+                assertFalse(fresh.call("connector_status", Map.of()).path("nacos").has("version"));
+                fresh.eof();
+            }
+        }
+    }
 }

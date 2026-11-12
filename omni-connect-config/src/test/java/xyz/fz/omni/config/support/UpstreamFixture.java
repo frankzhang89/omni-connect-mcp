@@ -13,7 +13,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Real HTTP test peers, based on the documented Apollo and Nacos 2.x wire contracts. */
+/** Real HTTP test peers, based on documented Apollo and Nacos 1.x/2.x/3.x wire contracts. */
 public final class UpstreamFixture implements AutoCloseable {
     public static final String YAML =
             "# agent-converted\r\napp:\r\n  name: '订单'\r\n  enabled: 'true'\r\n";
@@ -24,6 +24,25 @@ public final class UpstreamFixture implements AutoCloseable {
     public final AtomicInteger writes = new AtomicInteger();
     public final AtomicInteger configReads = new AtomicInteger();
     public final Map<String, String> configurations = new ConcurrentHashMap<>();
+    public volatile String nacosVersion = "2.4.3";
+    public volatile int stateV3Status = -1;
+    public volatile int stateV1Status = -1;
+    public volatile String stateBody;
+    public volatile long stateDelayMillis;
+    public volatile int namespaceV3Status = 200;
+    public volatile String configBody;
+    public final AtomicInteger stateV3Reads = new AtomicInteger();
+    public final AtomicInteger stateV1Reads = new AtomicInteger();
+    public final AtomicInteger namespaceV3Reads = new AtomicInteger();
+    public final List<NacosRequest> nacosRequests = new CopyOnWriteArrayList<>();
+
+    public record NacosRequest(
+            String path,
+            String method,
+            Map<String, String> query,
+            Map<String, String> form,
+            String token) {}
+
     public volatile String lastApolloPath;
     public volatile String lastAuthorization;
     public volatile String lastTimestamp;
@@ -169,101 +188,8 @@ public final class UpstreamFixture implements AutoCloseable {
                         true);
             } else if (path.startsWith("/apollo/openapi/v1/envs/")) {
                 portal(exchange, path, rawBody);
-            } else if (path.equals("/nacos/v1/auth/login")) {
-                int count = logins.incrementAndGet();
-                respond(
-                        exchange,
-                        loginStatus,
-                        json.writeValueAsString(
-                                Map.of("accessToken", "test-token-" + count, "tokenTtl", tokenTtl)),
-                        true);
-            } else if ((path.equals("/nacos/v2/console/namespace/list")
-                            || path.equals("/nacos/v1/console/namespaces"))
-                    && exchange.getRequestMethod().equals("GET")) {
-                boolean legacy = path.equals("/nacos/v1/console/namespaces");
-                (legacy ? namespaceV1Reads : namespaceV2Reads).incrementAndGet();
-                int status = legacy ? namespaceV1Status : namespaceV2Status;
-                if (status != 200) {
-                    respond(exchange, status, "namespace endpoint unavailable", false);
-                    return;
-                }
-                long publicCount =
-                        configurations.keySet().stream().filter(key -> key.startsWith("|")).count();
-                var namespaces =
-                        List.of(
-                                Map.of(
-                                        "namespace",
-                                        "",
-                                        "namespaceShowName",
-                                        "public",
-                                        "configCount",
-                                        publicCount),
-                                Map.of(
-                                        "namespace",
-                                        "empty-ns",
-                                        "namespaceShowName",
-                                        "Empty namespace",
-                                        "configCount",
-                                        0));
-                respond(
-                        exchange,
-                        200,
-                        namespaceBody != null ? namespaceBody
-                                : json.writeValueAsString(Map.of("code", legacy ? 200 : 0, "data", namespaces)),
-                        true);
-            } else if (path.equals("/nacos/v1/cs/configs")) {
-                if (exchange.getRequestMethod().equals("POST")) {
-                    writes.incrementAndGet();
-                    lastPublish = form;
-                    if (delayMillis > 0) Thread.sleep(delayMillis);
-                    if (publishStatus == 200 && publishReply.equals("true"))
-                        configurations.put(key(form), form.get("content"));
-                    respond(exchange, publishStatus, publishReply, false);
-                } else {
-                    int count = configReads.incrementAndGet();
-                    if (rejectFirstRead && count == 1) {
-                        respond(exchange, 403, "expired", false);
-                        return;
-                    }
-                    if (delayMillis > 0) Thread.sleep(delayMillis);
-                    if (readStatus != 200) {
-                        respond(exchange, readStatus, "PRIVATE_UPSTREAM_ERROR", false);
-                        return;
-                    }
-                    if ("accurate".equals(query.get("search")) && "".equals(query.get("dataId"))) {
-                        int pageNo = Integer.parseInt(query.get("pageNo"));
-                        int pageSize = Integer.parseInt(query.get("pageSize"));
-                        String prefix = key(query);
-                        var matches =
-                                configurations.keySet().stream()
-                                        .filter(key -> key.startsWith(prefix))
-                                        .sorted()
-                                        .toList();
-                        var items =
-                                matches.stream()
-                                        .skip((long) (pageNo - 1) * pageSize)
-                                        .limit(pageSize)
-                                        .map(
-                                                key ->
-                                                        Map.of(
-                                                                "dataId",
-                                                                key.substring(prefix.length())))
-                                        .toList();
-                        respond(
-                                exchange,
-                                200,
-                                json.writeValueAsString(
-                                        Map.of("totalCount", matches.size(), "pageItems", items)),
-                                true);
-                        return;
-                    }
-                    String content = configurations.get(key(query));
-                    respond(
-                            exchange,
-                            content == null ? 404 : 200,
-                            content == null ? "not found" : content,
-                            false);
-                }
+            } else if (path.startsWith("/nacos/")) {
+                nacos(exchange, path, query, form);
             } else respond(exchange, 501, "Endpoint not modeled", false);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -367,9 +293,178 @@ public final class UpstreamFixture implements AutoCloseable {
         } else respond(exchange, 501, "Endpoint not modeled", false);
     }
 
+    /** Models version-specific wire contracts, rejecting accidental cross-generation calls. */
+    private void nacos(
+            HttpExchange exchange, String path, Map<String, String> query, Map<String, String> form)
+            throws IOException, InterruptedException {
+        String method = exchange.getRequestMethod();
+        String token = exchange.getRequestHeaders().getFirst("accessToken");
+        nacosRequests.add(
+                new NacosRequest(path, method, Map.copyOf(query), Map.copyOf(form), token));
+        boolean v3 = nacosVersion.startsWith("3.");
+        boolean legacy =
+                nacosVersion.startsWith("1.")
+                        || nacosVersion.startsWith("2.0.")
+                        || nacosVersion.startsWith("2.1.");
+        if (path.endsWith("/state")) {
+            boolean newer = path.equals("/nacos/v3/admin/core/state");
+            (newer ? stateV3Reads : stateV1Reads).incrementAndGet();
+            if (stateDelayMillis > 0) Thread.sleep(stateDelayMillis);
+            int override = newer ? stateV3Status : stateV1Status;
+            int status = override >= 0 ? override : (newer == v3 ? 200 : (newer ? 404 : 410));
+            Object state = Map.of("version", nacosVersion);
+            if (newer) state = Map.of("code", 0, "data", state);
+            respond(
+                    exchange,
+                    status,
+                    stateBody != null ? stateBody : json.writeValueAsString(state),
+                    true);
+            return;
+        }
+        if (path.endsWith("/login")) {
+            if (!path.equals(v3 ? "/nacos/v3/auth/user/login" : "/nacos/v1/auth/login")) {
+                respond(exchange, 404, "wrong login API", false);
+                return;
+            }
+            int count = logins.incrementAndGet();
+            respond(
+                    exchange,
+                    loginStatus,
+                    json.writeValueAsString(
+                            Map.of("accessToken", "test-token-" + count, "tokenTtl", tokenTtl)),
+                    true);
+            return;
+        }
+        if (path.contains("/namespace")) {
+            boolean v1Path = path.equals("/nacos/v1/console/namespaces");
+            boolean v2Path = path.equals("/nacos/v2/console/namespace/list");
+            (v1Path ? namespaceV1Reads : v2Path ? namespaceV2Reads : namespaceV3Reads)
+                    .incrementAndGet();
+            String expected =
+                    v3
+                            ? "/nacos/v3/admin/core/namespace/list"
+                            : legacy
+                                    ? "/nacos/v1/console/namespaces"
+                                    : "/nacos/v2/console/namespace/list";
+            int status =
+                    !expected.equals(path)
+                            ? 404
+                            : v3
+                                    ? namespaceV3Status
+                                    : legacy ? namespaceV1Status : namespaceV2Status;
+            long publicCount =
+                    configurations.keySet().stream().filter(key -> key.startsWith("|")).count();
+            var namespaces =
+                    List.of(
+                            Map.of(
+                                    "namespace",
+                                    v3 ? "public" : "",
+                                    "namespaceShowName",
+                                    "public",
+                                    "configCount",
+                                    publicCount),
+                            Map.of(
+                                    "namespace",
+                                    "empty-ns",
+                                    "namespaceShowName",
+                                    "Empty namespace",
+                                    "configCount",
+                                    0));
+            respond(
+                    exchange,
+                    status,
+                    namespaceBody != null
+                            ? namespaceBody
+                            : json.writeValueAsString(
+                                    Map.of("code", v1Path ? 200 : 0, "data", namespaces)),
+                    true);
+            return;
+        }
+        String configPath = v3 ? "/nacos/v3/admin/cs/config" : "/nacos/v1/cs/configs";
+        if (!path.equals(configPath) && !(v3 && path.equals(configPath + "/list"))) {
+            respond(exchange, 404, "wrong configuration API", false);
+            return;
+        }
+        Map<String, String> args = method.equals("POST") ? form : query;
+        // A V3 token must be a header, and identity fields must use the V3 names.
+        if (v3
+                && (args.containsKey("accessToken")
+                        || args.containsKey("tenant")
+                        || args.containsKey("group")
+                        || !args.containsKey("namespaceId")
+                        || !args.containsKey("groupName")
+                        || token == null)) {
+            respond(exchange, 400, "wrong V3 parameters or token placement", false);
+            return;
+        }
+        if (method.equals("POST")) {
+            writes.incrementAndGet();
+            lastPublish = form;
+            if (delayMillis > 0) Thread.sleep(delayMillis);
+            if (publishStatus == 200 && publishReply.equals("true"))
+                configurations.put(key(form), form.get("content"));
+            String body =
+                    v3
+                            ? json.writeValueAsString(
+                                    Map.of("code", 0, "data", publishReply.equals("true")))
+                            : publishReply;
+            respond(exchange, publishStatus, configBody != null ? configBody : body, v3);
+            return;
+        }
+        int count = configReads.incrementAndGet();
+        if (rejectFirstRead && count == 1) {
+            respond(exchange, 403, "expired", false);
+            return;
+        }
+        if (delayMillis > 0) Thread.sleep(delayMillis);
+        if (readStatus != 200) {
+            respond(exchange, readStatus, "PRIVATE_UPSTREAM_ERROR", false);
+            return;
+        }
+        if ("accurate".equals(query.get("search")) && "".equals(query.get("dataId"))) {
+            int pageNo = Integer.parseInt(query.get("pageNo"));
+            int pageSize = Integer.parseInt(query.get("pageSize"));
+            String prefix = key(query);
+            var matches =
+                    configurations.keySet().stream()
+                            .filter(key -> key.startsWith(prefix))
+                            .sorted()
+                            .toList();
+            var items =
+                    matches.stream()
+                            .skip((long) (pageNo - 1) * pageSize)
+                            .limit(pageSize)
+                            .map(key -> Map.of("dataId", key.substring(prefix.length())))
+                            .toList();
+            Object page = Map.of("totalCount", matches.size(), "pageItems", items);
+            if (v3) page = Map.of("code", 0, "data", page);
+            respond(
+                    exchange,
+                    200,
+                    configBody != null ? configBody : json.writeValueAsString(page),
+                    true);
+            return;
+        }
+        String content = configurations.get(key(query));
+        String body =
+                content == null
+                        ? "not found"
+                        : v3
+                                ? json.writeValueAsString(
+                                        Map.of("code", 0, "data", Map.of("content", content)))
+                                : content;
+        respond(exchange, content == null ? 404 : 200, configBody != null ? configBody : body, v3);
+    }
+
     /** Builds a storage key from the full Nacos namespace, group, and dataId identity. */
     public static String key(Map<String, String> args) {
-        return args.getOrDefault("tenant", "") + "|" + args.get("group") + "|" + args.get("dataId");
+        String namespace = args.getOrDefault("namespaceId", args.getOrDefault("tenant", ""));
+        if (namespace.equals("public")) namespace = "";
+        return namespace
+                + "|"
+                + args.getOrDefault("groupName", args.get("group"))
+                + "|"
+                + args.get("dataId");
     }
 
     /**

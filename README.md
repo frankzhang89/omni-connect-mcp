@@ -7,7 +7,7 @@ One MCP server for Apollo, Nacos, relational databases, and standalone Redis. It
 | Connector | Capabilities |
 | --- | --- |
 | Apollo | Read published configurations; read and update existing properties items through Portal OpenAPI; optionally publish updates. |
-| Nacos | Discover namespaces and configuration IDs; read, create, and replace complete configuration documents. Namespace discovery supports the V1 and V2 APIs. |
+| Nacos | Discover namespaces and configuration IDs; read, create, and replace complete configuration documents. Detects Nacos 1.x/2.x/3.x once per connection and selects version-specific APIs. |
 | JDBC | Connect to MySQL, PostgreSQL, Oracle, SQL Server, and StarRocks; inspect metadata; query data; execute DML and DDL; manage explicit transactions and switch databases at runtime. |
 | Redis | Connect to standalone Redis; scan keys; inspect type, TTL, and size; read and write string, list, set, hash, and sorted-set values; manage expiry and logical database selection. |
 | Configuration conversion | Convert properties and YAML offline, without connecting to a configuration server. |
@@ -106,7 +106,7 @@ spring:
     mcp:
       server:
         name: omni-connect-mcp
-        version: 0.1.0
+        version: 0.1.1
         stdio: false
         protocol: STREAMABLE
         type: SYNC
@@ -218,7 +218,7 @@ omni:
 
 For example, a MySQL URL is `jdbc:mysql://mysql.example.com:3306/example?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC`. Set `JDBC_URL`, `JDBC_USERNAME`, and `JDBC_PASSWORD`, then change `omni.jdbc.enabled` to `true` to connect at startup.
 
-All four connectors are disabled in the example YAML. Their `enabled` flags control startup activation, not whether an agent may connect later. JDBC validates its configured connection during startup; Apollo, Nacos, and Redis initialize without a startup connectivity probe. Runtime connection tools validate their candidate before replacing the active connection.
+All four connectors are disabled in the example YAML. Their `enabled` flags control startup activation, not whether an agent may connect later. JDBC validates its configured connection during startup; Nacos detects its server version during startup activation; Apollo and Redis initialize without a startup connectivity probe. Runtime connection tools validate their candidate before replacing the active connection.
 
 ## Connection lifecycle and tool discovery
 
@@ -260,13 +260,25 @@ For published YAML reads, missing namespace suffixes are appended according to `
 
 | Tool | Parameters | Behavior |
 | --- | --- | --- |
-| `nacos_connect` | Required: `serverAddr`. Optional: `contextPath`, `username`, `password`, `namespace`, `group`, `fileType`. | Validates namespace discovery and activates/replaces Nacos. Defaults: context `/nacos`, public namespace, group `DEFAULT_GROUP`, format `yaml`. |
+| `nacos_connect` | Required: `serverAddr`. Optional: `contextPath`, `username`, `password`, `namespace`, `group`, `fileType`. | Detects and returns the server `version`, validates namespace discovery, and activates/replaces Nacos. Defaults: context `/nacos`, public namespace, group `DEFAULT_GROUP`, format `yaml`. |
 | `nacos_list_namespaces` | None | Lists namespace IDs, display names, and configuration counts. |
 | `nacos_list_and_count_data_ids` | Optional: `namespace`, `group`. | Lists all data IDs and their total count for exactly one namespace/group, following all pages. |
 | `nacos_read_config` | Required: `dataId`. Optional: `group`, `namespace`, `fileType`. | Reads unchanged content and SHA-256. `dataId` is exact: no suffix is inferred or added. |
 | `nacos_publish_config` | Required: `dataId`, `content`. Optional: `group`, `namespace`, `fileType`. | Creates or replaces the entire document. Content must already match `fileType`; publication never converts it. |
 
-Namespace discovery tries the V2 API first and falls back to V1 only when V2 returns HTTP 404. Authentication errors and malformed responses do not trigger fallback. This covers Nacos V1/V2 APIs, not the separate Nacos 3.x console APIs.
+Each new Nacos connection detects the server version once before activation. Startup activation (`omni.config.nacos.enabled: true` with `server-addr`) detects immediately; when disabled, no Nacos request is sent until `nacos_connect`. Detection requests `{serverAddr}{contextPath}/v3/admin/core/state`, trying `/v1/console/server/state` only if the V3 state endpoint returns HTTP 404 or 410. It accepts a top-level `version` or a successful envelope containing `data.version`. Missing or malformed versions, unsupported major versions, authentication errors, and network failures stop activation. A failed runtime activation retains the previous connection and version.
+
+| Server version | Namespace list | Configuration read / publish | Configuration list | Login |
+| --- | --- | --- | --- | --- |
+| 1.x, 2.0.x, 2.1.x | `/v1/console/namespaces` | `/v1/cs/configs` | `/v1/cs/configs` | `/v1/auth/login` |
+| 2.2.x and later 2.x | `/v2/console/namespace/list` | `/v1/cs/configs` | `/v1/cs/configs` | `/v1/auth/login` |
+| 3.x | `/v3/admin/core/namespace/list` | `/v3/admin/cs/config` | `/v3/admin/cs/config/list` | `/v3/auth/user/login` |
+
+All paths use the configured server origin and context path. Nacos 3.x uses server Admin APIs, so no separate console URL is needed. Supply an account with namespace-list/Admin API access and the required configuration read/write permissions when authentication is enabled. The connector sends 3.x tokens in the `accessToken` header; earlier versions use query/form parameters. Public namespace input remains empty string or `public`, and namespace-list output normalizes the public ID to empty string.
+
+The immutable detected version is returned by `nacos_connect` and `connector_status.nacos.version`. Requests and MCP sessions in one process reuse that connection's API selection; business endpoint failures never trigger version probing or API downgrade. Read authentication may refresh a token and retry once on the same API; publications are never automatically replayed. Reconnect with `nacos_connect` after a server upgrade. Restarting the process discards the cached version and runtime settings.
+
+Compatibility tests model representative 1.4.x, 2.0/2.1, 2.2, 2.4, 3.0 and 3.2 contracts with local HTTP peers and a Postman simulation. These are not an exhaustive live-server certification of every patch release.
 
 ### JDBC
 

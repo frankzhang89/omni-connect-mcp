@@ -23,8 +23,18 @@ public final class ConnectorRegistry implements AutoCloseable {
         String source;
     }
 
-    public record Target(List<SyncToolSpecification> tools, Runnable cleanup)
+    public record Target(
+            List<SyncToolSpecification> tools, Runnable cleanup, Map<String, String> metadata)
             implements AutoCloseable {
+        public Target(List<SyncToolSpecification> tools, Runnable cleanup) {
+            this(tools, cleanup, Map.of());
+        }
+
+        public Target {
+            tools = List.copyOf(tools);
+            metadata = Map.copyOf(metadata);
+        }
+
         public void close() {
             cleanup.run();
         }
@@ -92,15 +102,18 @@ public final class ConnectorRegistry implements AutoCloseable {
             }
             // The SDK sends list-change notifications when tools are added. A refresh is always
             // authoritative.
-            return Map.of(
-                    "success",
-                    true,
-                    "connector",
-                    id,
-                    "enabled",
-                    true,
-                    "tools",
-                    candidate.tools().stream().map(t -> t.tool().name()).toList());
+            var result = new LinkedHashMap<String, Object>(candidate.metadata());
+            result.putAll(
+                    Map.of(
+                            "success",
+                            true,
+                            "connector",
+                            id,
+                            "enabled",
+                            true,
+                            "tools",
+                            candidate.tools().stream().map(t -> t.tool().name()).toList()));
+            return result;
         } catch (RuntimeException error) {
             for (String name : added) {
                 try {
@@ -119,16 +132,17 @@ public final class ConnectorRegistry implements AutoCloseable {
     @McpTool(
             name = "connector_status",
             description =
-                    "List process-wide connector activation state, configuration source and tools."
-                        + " Credentials and addresses are never returned.")
+                    "List process-wide connector activation state, configuration source, tools and"
+                        + " detected Nacos version. Credentials and addresses are never returned.")
     public Map<String, Object> status() {
         var result = new TreeMap<String, Object>();
         slots.forEach(
                 (id, slot) -> {
                     slot.lock.readLock().lock();
                     try {
-                        result.put(
-                                id,
+                        var state = new LinkedHashMap<String, Object>();
+                        if (slot.target != null) state.putAll(slot.target.metadata());
+                        state.putAll(
                                 Map.of(
                                         "enabled",
                                         slot.target != null,
@@ -140,6 +154,7 @@ public final class ConnectorRegistry implements AutoCloseable {
                                                 : slot.target.tools().stream()
                                                         .map(t -> t.tool().name())
                                                         .toList()));
+                        result.put(id, state);
                     } finally {
                         slot.lock.readLock().unlock();
                     }

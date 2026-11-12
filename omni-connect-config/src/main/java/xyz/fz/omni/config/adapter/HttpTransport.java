@@ -53,10 +53,16 @@ public class HttpTransport implements AutoCloseable {
 
     /** Posts form data and distinguishes configuration writes from authentication requests. */
     public Response post(URI uri, MultiValueMap<String, String> form, boolean configWrite) {
+        return post(uri, new HttpHeaders(), form, configWrite);
+    }
+
+    /** Posts form data with provider authentication headers. */
+    public Response post(
+            URI uri, HttpHeaders headers, MultiValueMap<String, String> form, boolean configWrite) {
         return request(
                 HttpMethod.POST,
                 uri,
-                new HttpHeaders(),
+                headers,
                 form,
                 MediaType.APPLICATION_FORM_URLENCODED,
                 configWrite);
@@ -99,7 +105,7 @@ public class HttpTransport implements AutoCloseable {
                 throw new MigrationException(
                         WRITE_RESULT_UNKNOWN,
                         "Write transport failed; target may have changed. Read it back before"
-                            + " retrying");
+                                + " retrying");
             boolean timeout = false;
             for (Throwable cause = e; cause != null; cause = cause.getCause()) {
                 if (cause instanceof java.net.http.HttpTimeoutException

@@ -9,7 +9,7 @@ import zipfile
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('version', help='Version tag, for example v0.1.0')
+    parser.add_argument('version', help='Version tag, for example v0.1.1')
     args = parser.parse_args()
     if not re.fullmatch(r'v[A-Za-z0-9][A-Za-z0-9._-]*', args.version):
         parser.error('Version must start with v and contain only letters, digits, dots, underscores, or hyphens.')

@@ -1,6 +1,6 @@
 version: 1
-name: nacos-config-2x
-slug: nacos-config-2x
+name: nacos-config-multiversion
+slug: nacos-config-multiversion
 protocol: http
 interceptRequests: true
 scenarios:
