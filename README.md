@@ -2,8 +2,7 @@
 
 One MCP server for Apollo, Nacos, relational databases, standalone Redis, RabbitMQ, and Kafka. It runs from one executable JAR with one external `application.yml` and supports both stdio and Streamable HTTP.
 
-See [Release Notes](RELEASE_NOTES.md) for version history. Every code change must update
-the English release notes in the same change; record post-release changes under `Unreleased`.
+See [Release Notes](RELEASE_NOTES.md) for version history. Record post-release changes under `Unreleased`.
 
 ## Capabilities
 
@@ -478,33 +477,6 @@ mvn clean package '-Dbase.export.path={yourExpectedPath}'
 The default export is `target/release/omni-connect-mcp/omni-connect-mcp.jar`. Replace `{yourExpectedPath}` with your desired absolute output directory; the second command exports the JAR to `{yourExpectedPath}/omni-connect-mcp/omni-connect-mcp.jar`. Maven exports only the runnable JAR. Copy the example YAML and required platform launchers separately when assembling a deployment from a local build. Intermediate artifacts remain in module `target/` directories.
 
 Tests are skipped by default. Run `mvn clean verify -DskipTests=false` to execute them and `python tests/test_release.py` with `JAVA_HOME` set to JDK 25 to exercise the packaged JAR and launchers.
-
-### Publishing a release
-
-Starting with v0.2.0, pushing a version tag such as `v0.2.0` triggers the tagged-build
-workflow. Commit the matching Maven/configuration versions and an English
-`## v0.2.0` section in [RELEASE_NOTES.md](RELEASE_NOTES.md) before tagging.
-The workflow checks that the tag matches the root Maven version, extracts only that
-version's Markdown section, runs the build and tests, and publishes the notes as the
-GitHub Release body alongside the Windows ZIP and Linux tar.gz files. Missing,
-duplicate or empty sections stop the workflow before building or publishing.
-
-The release notes are read from the tagged source. `Unreleased` and other versions
-are excluded. Rerunning a tagged build refreshes that release's assets and replaces
-its body with the notes from the same tag, overwriting manual edits made on the
-GitHub website. Existing historical releases are not backfilled.
-
-Preview the selected notes and run the offline release automation tests with:
-
-```powershell
-python scripts/extract_release_notes.py v0.2.0 --output target/release-notes.md
-python -m unittest discover -s tests -p test_release_notes.py -v
-```
-
-The workflow keeps its prepared notes in the runner's temporary directory so that
-`mvn clean` does not remove them. The publishing script requires GitHub CLI and uses
-the workflow's existing `GITHUB_TOKEN` through `GH_TOKEN` with `contents: write`.
-
 
 ### RabbitMQ and Kafka (development diagnostics)
 

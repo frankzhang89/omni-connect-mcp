@@ -1,7 +1,5 @@
 # Release Notes
 
-Release notes are written in English, with the newest version first.
-
 ## v0.2.0
 
 - Added RabbitMQ connectivity through the Management HTTP API and optional AMQP connections.
