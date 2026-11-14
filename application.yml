@@ -6,7 +6,7 @@ spring:
     mcp:
       server:
         name: omni-connect-mcp
-        version: 0.1.1
+        version: 0.2.0
         stdio: false
         protocol: STREAMABLE
         type: SYNC

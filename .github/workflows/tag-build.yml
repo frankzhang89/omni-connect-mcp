@@ -30,6 +30,16 @@ jobs:
           java-version: '25'
           cache: maven
 
+      - name: Test release notes automation
+        run: python3 -m unittest discover -s tests -p test_release_notes.py -v
+
+      - name: Validate version and prepare release notes
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          python3 scripts/extract_release_notes.py "$RELEASE_VERSION" --output "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build and run all tests
         run: mvn --batch-mode --no-transfer-progress clean verify -DskipTests=false
 
@@ -65,14 +75,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
-          windows_archive="target/dist/omni-connect-mcp-${RELEASE_VERSION}-windows.zip"
-          linux_archive="target/dist/omni-connect-mcp-${RELEASE_VERSION}-linux.tar.gz"
-          if gh release view "$RELEASE_VERSION" > /dev/null 2>&1; then
-            gh release upload "$RELEASE_VERSION" "$windows_archive" "$linux_archive" --clobber
-          else
-            gh release create "$RELEASE_VERSION" "$windows_archive" "$linux_archive" \
-              --verify-tag --title "$RELEASE_VERSION" --generate-notes
-          fi
+          python3 scripts/publish_release.py "$RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
 
       - name: Upload failure diagnostics
         if: failure()
