@@ -57,7 +57,7 @@ class Child:
         assert result['serverInfo']['name'] == 'omni-connect-mcp'
         self.process.stdin.write(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
         self.process.stdin.flush()
-        assert len(self.rpc('tools/list', {})['tools']) == 6
+        assert len(self.rpc('tools/list', {})['tools']) == 8
     def finish(self):
         self.process.stdin.close()
         assert self.process.wait(timeout=30) == 0, ''.join(self.errors)

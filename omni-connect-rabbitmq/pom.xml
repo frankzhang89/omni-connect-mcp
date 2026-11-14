@@ -1,0 +1,8 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+  <parent><groupId>xyz.fz</groupId><artifactId>omni-connect-mcp</artifactId><version>0.1.1</version></parent>
+  <artifactId>omni-connect-rabbitmq</artifactId>
+  <dependencies>
+    <dependency><groupId>xyz.fz</groupId><artifactId>omni-connect-core</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.rabbitmq</groupId><artifactId>amqp-client</artifactId></dependency>
+  </dependencies>
+</project>

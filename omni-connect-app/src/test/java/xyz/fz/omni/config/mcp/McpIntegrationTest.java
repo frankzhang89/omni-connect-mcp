@@ -100,6 +100,8 @@ class McpIntegrationTest {
                                                         "apollo_connect",
                                                         "nacos_connect",
                                                         "redis_connect",
+                                                        "rabbitmq_connect",
+                                                        "kafka_connect",
                                                         "db_switch_datasource")
                                                 .contains(t.name()))
                         .toList();

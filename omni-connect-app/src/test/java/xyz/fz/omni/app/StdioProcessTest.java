@@ -171,7 +171,7 @@ class StdioProcessTest {
             one.initialize();
             two.initialize();
             three.initialize();
-            assertEquals(6, one.rpc("tools/list", Map.of()).path("result").path("tools").size());
+            assertEquals(8, one.rpc("tools/list", Map.of()).path("result").path("tools").size());
             one.call(
                     "db_switch_datasource",
                     Map.of("jdbcUrl", "jdbc:h2:mem:child-one", "username", "sa", "password", ""));
@@ -190,7 +190,7 @@ class StdioProcessTest {
                             .path("jdbc")
                             .path("enabled")
                             .asBoolean());
-            assertEquals(6, RuntimeConnectionsTest.names(http).size());
+            assertEquals(8, RuntimeConnectionsTest.names(http).size());
             one.eof();
             assertTrue(two.process.isAlive());
             assertTrue(three.process.isAlive());
