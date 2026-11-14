@@ -87,7 +87,7 @@ class DatabaseMcpIntegrationTest {
                             .body()
                             .path("result")
                             .path("tools");
-            assertEquals(19, tools.size());
+            assertEquals(21, tools.size());
             JsonNode switchTool = null;
             for (JsonNode tool : tools) {
                 assertFalse(

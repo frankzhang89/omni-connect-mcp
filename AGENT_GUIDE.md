@@ -48,3 +48,24 @@ Keep transactions short: active, idle, lifetime, statement, and result limits ap
 `redis_write_key` writes supported types, appends lists, and merges hashes. Optional `ttlSeconds` sets expiry. `redis_delete_keys` and `redis_expire_key` are bounded write operations; zero TTL removes expiry. `redis_select_db` validates and changes the logical database for all Redis clients in this process. It is independent of JDBC switching.
 
 `redis_connect` replaces the Redis host/credentials/database generation. Failed PING keeps the old generation. Reconfiguration never inherits credentials from the previous server. Reads and writes respect YAML item/value limits.
+
+
+## RabbitMQ and Kafka
+
+Activate using `rabbitmq_connect` / `kafka_connect`, then refresh tools. RabbitMQ AMQP
+is optional; management-only activation cannot publish or ACK-consume. Connections and
+vhosts are global to the process. Do not inherit credentials across targets.
+
+Inspect queue Ready/Unack and rates, then consumers and channel connection names.
+Channel Unack may cover multiple queues. Management sampling fetches Ready messages
+and requeues them: it changes delivery state and cannot expose already Unack bodies.
+For Kafka inspect group assignments and per-partition offsets. Lag is not a business
+completion guarantee. `kafka_read_records` does not join or commit to a business group.
+
+Publish tools inject test events into existing topology. Consumer tools stand in for
+message receipt, not business processing: RabbitMQ ACKs remove messages; Kafka group
+consumption can rebalance business clients and explicit commit=true advances that group.
+Use explicit targets and inspect progress/results. Never blindly retry unknown publish,
+consume or commit outcomes. Kafka producer idempotence does not deduplicate repeated calls.
+Use messageId/correlationId/trace headers and Kafka offsets to correlate application logs.
+Real broker acceptance is pending; offline tests do not establish live compatibility.

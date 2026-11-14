@@ -230,7 +230,7 @@ class RuntimeConnectionsTest {
                 var context = start();
                 var first = client(context);
                 var second = client(context)) {
-            assertEquals(6, names(first).size());
+            assertEquals(8, names(first).size());
             assertFalse(names(first).contains("db_query"));
             call(first, "convert_config", Map.of("content", "answer=42"));
             call(first, "apollo_connect", Map.of("meta", peers.apollo(), "appId", "source-app"));
@@ -260,7 +260,7 @@ class RuntimeConnectionsTest {
                     first,
                     "db_switch_datasource",
                     Map.of("jdbcUrl", url, "username", "sa", "password", ""));
-            assertEquals(19, names(second).size());
+            assertEquals(21, names(second).size());
             call(first, "db_execute_ddl", Map.of("sql", "CREATE TABLE omni_sample(id INT)"));
             var begin = call(first, "db_execute", Map.of("sql", "BEGIN"));
             String tx = begin.path("transactionId").asString();
@@ -286,7 +286,7 @@ class RuntimeConnectionsTest {
                 rs.next();
                 assertEquals(1, rs.getInt(1));
             }
-            assertEquals(19, names(first).size());
+            assertEquals(21, names(first).size());
             assertTrue(
                     call(first, "connector_status", Map.of())
                             .path("jdbc")
@@ -295,7 +295,7 @@ class RuntimeConnectionsTest {
         }
         try (var context = start();
                 var fresh = client(context)) {
-            assertEquals(6, names(fresh).size());
+            assertEquals(8, names(fresh).size());
         }
     }
 
@@ -309,7 +309,7 @@ class RuntimeConnectionsTest {
                                 "--omni.config.nacos.username=user",
                                 "--omni.config.nacos.password=password");
                 var client = client(context)) {
-            assertEquals(10, names(client).size());
+            assertEquals(12, names(client).size());
             assertFalse(names(client).contains("apollo_read_config"));
             call(client, "nacos_list_namespaces", Map.of());
         }
@@ -338,7 +338,7 @@ class RuntimeConnectionsTest {
                             "password",
                             ""));
             call(client, "redis_connect", Map.of("host", "127.0.0.1", "port", redis.port()));
-            assertEquals(26, names(client).size());
+            assertEquals(28, names(client).size());
             call(
                     client,
                     "redis_write_key",
@@ -362,7 +362,7 @@ class RuntimeConnectionsTest {
                     client,
                     "redis_connect",
                     Map.of("host", "127.0.0.1", "port", redis.port(), "database", 1));
-            assertEquals(26, names(client).size());
+            assertEquals(28, names(client).size());
             assertFalse(
                     call(client, "redis_inspect_key", Map.of("key", "greeting"))
                             .path("exists")

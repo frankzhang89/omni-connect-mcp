@@ -8,6 +8,8 @@
     </parent>
     <artifactId>omni-connect-app</artifactId>
     <dependencies>
+        <dependency><groupId>xyz.fz</groupId><artifactId>omni-connect-rabbitmq</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>xyz.fz</groupId><artifactId>omni-connect-kafka</artifactId><version>${project.version}</version></dependency>
         <dependency>
             <groupId>xyz.fz</groupId>
             <artifactId>omni-connect-core</artifactId>

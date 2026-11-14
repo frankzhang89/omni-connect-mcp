@@ -28,6 +28,8 @@
         <module>omni-connect-config</module>
         <module>omni-connect-jdbc</module>
         <module>omni-connect-redis</module>
+        <module>omni-connect-rabbitmq</module>
+        <module>omni-connect-kafka</module>
         <module>omni-connect-app</module>
     </modules>
     <dependencyManagement>
@@ -48,4 +50,16 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Avoid runtime self-attachment on JDK 25 and restricted desktops. -->
+                    <argLine>-javaagent:"${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar"</argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

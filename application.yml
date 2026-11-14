@@ -99,3 +99,41 @@ omni:
       max-scan-count: 100
       max-items: 100
       max-value-chars: 4000
+  rabbitmq:
+    enabled: false
+    connection:
+      management-url: ${RABBITMQ_MANAGEMENT_URL:http://localhost:15672}
+      username: ${RABBITMQ_USERNAME:}
+      password: ${RABBITMQ_PASSWORD:}
+      virtual-host: ${RABBITMQ_VHOST:/}
+      amqp:
+        addresses: ${RABBITMQ_AMQP_ADDRESSES:}
+        # Omit username/password here to reuse this generation's management credentials.
+    timeouts:
+      connect-ms: 5000
+      operation-ms: 10000
+      max-wait-ms: 15000
+    limits:
+      max-items: 100
+      max-messages: 100
+      max-samples: 10
+      preview-bytes: 4096
+      max-payload-bytes: 65536
+      max-response-bytes: 1048576
+  kafka:
+    enabled: false
+    connection:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      security-protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+      username: ${KAFKA_USERNAME:}
+      password: ${KAFKA_PASSWORD:}
+    timeouts:
+      connect-ms: 5000
+      operation-ms: 10000
+      max-wait-ms: 15000
+    limits:
+      max-items: 100
+      max-messages: 100
+      preview-bytes: 4096
+      max-payload-bytes: 65536
+      max-response-bytes: 1048576

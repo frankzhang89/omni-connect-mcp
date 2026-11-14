@@ -1,6 +1,6 @@
 # Omni Connect MCP
 
-One MCP server for Apollo, Nacos, relational databases, and standalone Redis. It runs from one executable JAR with one external `application.yml` and supports both stdio and Streamable HTTP.
+One MCP server for Apollo, Nacos, relational databases, standalone Redis, RabbitMQ, and Kafka. It runs from one executable JAR with one external `application.yml` and supports both stdio and Streamable HTTP.
 
 ## Capabilities
 
@@ -10,6 +10,8 @@ One MCP server for Apollo, Nacos, relational databases, and standalone Redis. It
 | Nacos | Discover namespaces and configuration IDs; read, create, and replace complete configuration documents. Detects Nacos 1.x/2.x/3.x once per connection and selects version-specific APIs. |
 | JDBC | Connect to MySQL, PostgreSQL, Oracle, SQL Server, and StarRocks; inspect metadata; query data; execute DML and DDL; manage explicit transactions and switch databases at runtime. |
 | Redis | Connect to standalone Redis; scan keys; inspect type, TTL, and size; read and write string, list, set, hash, and sorted-set values; manage expiry and logical database selection. |
+| RabbitMQ | Inspect queues, bindings, consumers and Channel Unack; sample Ready messages; publish and ACK-consume bounded messages. |
+| Kafka | Inspect topics, partitions, consumer groups and lag; observe records without commits; publish and simulate bounded group consumption. |
 | Configuration conversion | Convert properties and YAML offline, without connecting to a configuration server. |
 
 ## Quick start
@@ -218,13 +220,13 @@ omni:
 
 For example, a MySQL URL is `jdbc:mysql://mysql.example.com:3306/example?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC`. Set `JDBC_URL`, `JDBC_USERNAME`, and `JDBC_PASSWORD`, then change `omni.jdbc.enabled` to `true` to connect at startup.
 
-All four connectors are disabled in the example YAML. Their `enabled` flags control startup activation, not whether an agent may connect later. JDBC validates its configured connection during startup; Nacos detects its server version during startup activation; Apollo and Redis initialize without a startup connectivity probe. Runtime connection tools validate their candidate before replacing the active connection.
+All six connectors are disabled in the example YAML. Their `enabled` flags control startup activation, not whether an agent may connect later. JDBC validates its configured connection during startup; Nacos detects its server version during startup activation; Apollo and Redis initialize without a startup connectivity probe. Runtime connection tools validate their candidate before replacing the active connection.
 
 ## Connection lifecycle and tool discovery
 
-There are **26 tools** when all connectors are active. With every connector disabled, these six remain available:
+There are **43 tools** when all connectors are active. With every connector disabled, these eight remain available:
 
-`connector_status`, `apollo_connect`, `nacos_connect`, `db_switch_datasource`, and `redis_connect`, plus the offline `convert_config` tool.
+`connector_status`, `apollo_connect`, `nacos_connect`, `db_switch_datasource`, `redis_connect`, `rabbitmq_connect`, and `kafka_connect`, plus the offline `convert_config` tool.
 
 1. Call `connector_status` to inspect active connectors.
 2. Activate the required connector using its connection tool and your connection parameters.
@@ -473,3 +475,75 @@ mvn clean package '-Dbase.export.path={yourExpectedPath}'
 The default export is `target/release/omni-connect-mcp/omni-connect-mcp.jar`. Replace `{yourExpectedPath}` with your desired absolute output directory; the second command exports the JAR to `{yourExpectedPath}/omni-connect-mcp/omni-connect-mcp.jar`. Maven exports only the runnable JAR. Copy the example YAML and required platform launchers separately when assembling a deployment from a local build. Intermediate artifacts remain in module `target/` directories.
 
 Tests are skipped by default. Run `mvn clean verify -DskipTests=false` to execute them and `python tests/test_release.py` with `JAVA_HOME` set to JDK 25 to exercise the packaged JAR and launchers.
+
+
+### RabbitMQ and Kafka (development diagnostics)
+
+The two independent modules add 17 tools. Only `rabbitmq_connect` and `kafka_connect`
+are advertised before activation; successful activation registers 8 RabbitMQ / 7 Kafka
+business tools. Refresh `tools/list`. All targets are process-wide, memory-only;
+failed replacements retain the old target. YAML `enabled` controls startup activation.
+With all connectors disabled there are 8 tools; all six enabled expose 43.
+
+RabbitMQ requires an HTTP Management API (including an optional reverse-proxy prefix).
+AMQP addresses are optional: management-only targets can inspect and sample, while
+publish/consume return `CAPABILITY_NOT_CONFIGURED`. If AMQP addresses are supplied,
+both connections must validate. Missing AMQP credentials reuse the credentials from
+this request, never from a previous target. Kafka supports `PLAINTEXT` or
+`SASL_PLAINTEXT` with PLAIN. TLS, SCRAM, Kerberos and OAuth are outside this version.
+
+| Tool | Arguments and behavior |
+|---|---|
+| `rabbitmq_connect` | Required `managementUrl`, `username`, `password`; optional `virtualHost` (default `/`), comma-separated `amqpAddresses`, `amqpUsername`, `amqpPassword`. |
+| `rabbitmq_list_queues` | Optional `nameContains`, `page`, `pageSize`; queue type, Ready, Unack, consumer counts. |
+| `rabbitmq_inspect_queue` | Required `queue`; counts, rates, arguments and effective policies. Missing metrics stay null. |
+| `rabbitmq_list_bindings` | Exactly one of `queue` or `exchange`; optional `page`, `pageSize`. |
+| `rabbitmq_list_consumers` | Optional `queue`, `page`, `pageSize`; ACK modes, prefetch and channel identifiers. |
+| `rabbitmq_inspect_channel` | Required `channelName`; channel-wide Unack and application connection details. |
+| `rabbitmq_sample_messages` | Required `queue`; optional `count` (default 3, max 10). Fetches Ready messages and requeues them; changes delivery state and may affect ordering. Cannot inspect Unack bodies. |
+| `rabbitmq_publish_message` | Required `exchange` (empty string allowed), `routingKey`, `payload`; optional `encoding`, string `headers`, `contentType`, `messageId`, `correlationId`, `persistent` (default true). Uses mandatory routing and publisher confirms. |
+| `rabbitmq_consume_messages` | Required `queue`; optional `count`, `maxWaitMs`. Pulls and ACKs messages, removing them. `ackStatus=SENT` is not a broker receipt or business processing guarantee. |
+| `kafka_connect` | Required comma-separated `bootstrapServers`; optional `securityProtocol`, `username`, `password`. Validates metadata, not every resource permission. |
+| `kafka_list_topics` | Optional `nameContains`, `includeInternal` (false), `limit`. |
+| `kafka_inspect_topic` | Required `topic`; optional `limit`; partition leaders, replicas, ISR and retained offset boundaries. |
+| `kafka_list_consumer_groups` | Optional `nameContains`, `limit`. |
+| `kafka_inspect_consumer_group` | Required `groupId`; optional `topic`, `limit`; members, assignments, committed/end offsets and lag. Missing or out-of-range offsets are not zero lag. |
+| `kafka_read_records` | Required `topic`, `partition`; optional `start` (`latest`, `earliest`, `offset`, `timestamp`), `offset`, `timestampMs`, `count`, `maxWaitMs`. No group membership or commits. Latest reads a recent offset window, not necessarily exactly N records. |
+| `kafka_publish_record` | Required `topic`, `payload`; optional string `key`, `partition`, `encoding`, string `headers`. Returns broker partition/offset/timestamp. |
+| `kafka_consume_records` | Required `topic`, `groupId`; optional `count`, `maxWaitMs`, `commit` (false), `offsetReset` (`earliest`, `latest`, `none`; default earliest). Joins that group and may rebalance other consumers. Commits only returned records when explicitly requested. |
+
+Message encoding is `utf8` (default) or `base64`. Reads preserve message identifiers,
+correlation headers and Kafka topic/partition/offset. JSON bodies remain original text.
+Defaults: list size 50/max 100; reads/consumes 10/max 100; preview 4096 bytes;
+publish payload max 65536 bytes; message result max 1 MiB; wait 5s/max 15s.
+Configure limits under `omni.rabbitmq.limits` / `omni.kafka.limits`, and timeouts
+under each connector's `timeouts` (`connect-ms`, `operation-ms`, `max-wait-ms`).
+
+Publisher confirmation does not mean business processing succeeded. Unknown publish,
+ACK or commit outcomes must not be blindly retried. Kafka producer idempotence does
+not deduplicate repeated MCP tool calls. Kafka lag is an offset distance, not proof of
+business processing or an exact message count. Consumers are short-lived; no persistent
+subscription or cross-call ACK handle exists. No resource creation, purge or offset reset
+is exposed. Existing topics/exchanges/queues and suitable permissions are required.
+
+Examples (connect first, refresh tools):
+
+```json
+{"name":"rabbitmq_connect","arguments":{"managementUrl":"http://localhost:15672","username":"debug","password":"<password>","amqpAddresses":"localhost:5672"}}
+{"name":"rabbitmq_inspect_queue","arguments":{"queue":"orders"}}
+{"name":"rabbitmq_publish_message","arguments":{"exchange":"","routingKey":"orders","payload":"{\"orderId\":123}","contentType":"application/json","correlationId":"debug-123"}}
+{"name":"kafka_connect","arguments":{"bootstrapServers":"localhost:9092"}}
+{"name":"kafka_read_records","arguments":{"topic":"orders","partition":0,"start":"latest","count":3}}
+{"name":"kafka_consume_records","arguments":{"topic":"orders","groupId":"debug-orders","commit":false,"count":3}}
+```
+
+For backlog diagnostics, inspect queues/groups, then consumers/channels or partitions,
+then correlate sampled records with application logs using their existing identifiers.
+To exercise a partial business flow, publish a test event or explicitly consume as a
+stand-in. Using a business Kafka group affects its assignment and, when commit=true,
+its future consumption position.
+
+Validation boundary: this release is implemented and tested offline using local HTTP
+fixtures and client test doubles. Real RabbitMQ/Kafka authentication, routing, confirms,
+ACKs, group rebalance, metrics and broker-version compatibility require later acceptance
+in an environment with test brokers. No broker/container is required by default tests.
