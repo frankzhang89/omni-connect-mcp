@@ -41,9 +41,13 @@ class RabbitMqOfflineTest {
                                     ? "[]"
                                     : path.contains("whoami")
                                             ? "{\"name\":\"debug\"}"
+                                            : path.contains("/bindings/")
+                                                    ? "[]"
                                             : path.contains("/queues/")
                                                             && e.getRequestURI().getQuery() != null
-                                                    ? "{\"items\":[],\"page\":1}"
+                                                    ? (e.getRequestURI().getQuery().contains("columns=")
+                                                            ? "[]"
+                                                            : "{\"items\":[{\"name\":\"q\",\"messages_ready\":2,\"arguments\":{}}],\"page\":1}")
                                                     : "{\"name\":\"q\",\"messages_ready\":2}";
                     byte[] b = body.getBytes(StandardCharsets.UTF_8);
                     e.sendResponseHeaders(status.get(), b.length);
@@ -69,8 +73,16 @@ class RabbitMqOfflineTest {
             var result = r.inspectQueue("a/b");
             assertTrue(lastPath.get().contains("%2F/a%2Fb"));
             assertNull(result.get("messages_unacknowledged"));
+            var queues = r.queues(null, 1, 1);
+            var items = (List<?>) queues.get("items");
+            assertEquals(1, items.size(), "Legacy pagination must retain the queue");
+            assertEquals(2, ((Map<?, ?>) items.getFirst()).get("messages_ready"));
+            assertFalse(((Map<?, ?>) items.getFirst()).containsKey("arguments"));
             r.sample("q", 2);
             assertTrue(lastBody.get().contains("ack_requeue_true"));
+            assertTrue(lastBody.get().contains("\"requeue\":true"));
+            r.bindings(null, "", 1, 10);
+            assertTrue(lastPath.get().contains("/exchanges/%2F/amq.default/bindings/"));
             var tools = new RabbitMqTools(r, new MockEnvironment());
             assertTrue(
                     tools.rabbitmq_publish_message("", "q", "x", null, null, null, null, null, null)

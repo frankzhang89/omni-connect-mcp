@@ -68,4 +68,7 @@ consumption can rebalance business clients and explicit commit=true advances tha
 Use explicit targets and inspect progress/results. Never blindly retry unknown publish,
 consume or commit outcomes. Kafka producer idempotence does not deduplicate repeated calls.
 Use messageId/correlationId/trace headers and Kafka offsets to correlate application logs.
-Real broker acceptance is pending; offline tests do not establish live compatibility.
+RabbitMQ core live acceptance passed against 3.6.5; see RABBITMQ_ACCEPTANCE.md for
+tested scenarios and exclusions. Kafka core live acceptance passed against the local
+PLAINTEXT broker; see KAFKA_ACCEPTANCE.md for tested scenarios, version uncertainty and
+exclusions. Offline tests do not establish additional live compatibility.

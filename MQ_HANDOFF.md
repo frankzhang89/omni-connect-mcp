@@ -2,6 +2,8 @@
 
 更新日期：2026-11-14（Asia/Shanghai）。本文供切换到有真实 MQ 测试条件的环境后，由其他 Agent 接续开发、排障和验收。
 
+> 后续进展（同日）：已在用户提供的 RabbitMQ 3.6.5 上完成核心真实链路验收并修复三处管理接口兼容问题，详见 [RABBITMQ_ACCEPTANCE.md](RABBITMQ_ACCEPTANCE.md)。随后完成本机 `localhost:9092` 无认证 Kafka 核心真实链路验收，详见 [KAFKA_ACCEPTANCE.md](KAFKA_ACCEPTANCE.md)。下面“真实验收尚未开始”和未提交文件状态是原交接时的历史记录，以新验收记录及实际 Git 状态为准。
+
 ## 1. 接手时先看这些信息
 
 - 当前分支：`dev_mq`。

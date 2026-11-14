@@ -543,7 +543,9 @@ To exercise a partial business flow, publish a test event or explicitly consume 
 stand-in. Using a business Kafka group affects its assignment and, when commit=true,
 its future consumption position.
 
-Validation boundary: this release is implemented and tested offline using local HTTP
-fixtures and client test doubles. Real RabbitMQ/Kafka authentication, routing, confirms,
-ACKs, group rebalance, metrics and broker-version compatibility require later acceptance
-in an environment with test brokers. No broker/container is required by default tests.
+Validation boundary: default tests use local HTTP fixtures and client test doubles;
+no broker/container is required. Core live scenarios also passed on RabbitMQ 3.6.5
+and a local PLAINTEXT Kafka broker. See [RABBITMQ_ACCEPTANCE.md](RABBITMQ_ACCEPTANCE.md)
+and [KAFKA_ACCEPTANCE.md](KAFKA_ACCEPTANCE.md) for reproducible opt-in tests, actual
+environment details and exclusions. Kafka SASL/ACL, fault injection and additional
+broker-version compatibility remain unverified.

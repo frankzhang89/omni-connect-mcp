@@ -137,9 +137,26 @@ public final class RabbitMqRuntime implements AutoCloseable {
                         + page
                         + "&page_size="
                         + size
-                        + "&pagination=true&columns=name,type,messages,messages_ready,messages_unacknowledged,consumers";
+                        + "&pagination=true";
         if (name != null) query += "&name=" + enc(name) + "&use_regex=false";
-        return page(request("GET", path("queues") + query, null), name, page, size);
+        // Older management versions apply columns to the pagination envelope as well,
+        // producing [] for a nonempty queue page. Project only after parsing the page.
+        var result =
+                new LinkedHashMap<>(
+                        page(request("GET", path("queues") + query, null), name, page, size));
+        var summaries = new ArrayList<Map<String, Object>>();
+        for (Object item : (List<?>) result.get("items")) {
+            var raw = object(item);
+            var summary = new LinkedHashMap<String, Object>();
+            for (String key :
+                    List.of(
+                            "name", "type", "messages", "messages_ready",
+                            "messages_unacknowledged", "consumers"))
+                if (raw.containsKey(key)) summary.put(key, raw.get(key));
+            summaries.add(summary);
+        }
+        result.put("items", summaries);
+        return result;
     }
 
     Map<String, Object> inspectQueue(String queue) throws Exception {
@@ -190,7 +207,7 @@ public final class RabbitMqRuntime implements AutoCloseable {
                                         "GET",
                                         path("exchanges")
                                                 + "/"
-                                                + enc(exchange)
+                                                + enc(exchange.isEmpty() ? "amq.default" : exchange)
                                                 + "/bindings/"
                                                 + direction,
                                         null));
@@ -259,6 +276,9 @@ public final class RabbitMqRuntime implements AutoCloseable {
                                 count,
                                 "ackmode",
                                 "ack_requeue_true",
+                                // RabbitMQ 3.6 uses requeue; newer versions use ackmode.
+                                "requeue",
+                                true,
                                 "encoding",
                                 "base64",
                                 "truncate",
