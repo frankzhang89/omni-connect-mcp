@@ -68,7 +68,3 @@ consumption can rebalance business clients and explicit commit=true advances tha
 Use explicit targets and inspect progress/results. Never blindly retry unknown publish,
 consume or commit outcomes. Kafka producer idempotence does not deduplicate repeated calls.
 Use messageId/correlationId/trace headers and Kafka offsets to correlate application logs.
-Core live scenarios passed against RabbitMQ 3.6.5 and a local PLAINTEXT Kafka broker
-whose server version was not identified. Additional broker versions, Kafka SASL/ACL
-and broker/network failure scenarios remain unverified. See README.md for opt-in
-broker test commands. Offline tests do not establish additional live compatibility.

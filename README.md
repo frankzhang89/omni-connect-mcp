@@ -315,6 +315,41 @@ Explicit transactions belong to their MCP session and require `db_execute` for e
 
 Lists append to the tail, sets add members, hashes merge fields, and sorted sets add/update member scores. Supply a positive `ttlSeconds` to `redis_write_key` to set expiry. Keep the logical database stable during a multi-page scan. Redis Cluster and Sentinel connection modes are not provided.
 
+### RabbitMQ
+
+| Tool | Parameters | Behavior |
+| --- | --- | --- |
+| `rabbitmq_connect` | Required: `managementUrl`, `username`, `password`. Optional: `virtualHost`, `amqpAddresses`, `amqpUsername`, `amqpPassword`. | Validates and activates/replaces RabbitMQ. Defaults: virtual host `/`. Supply comma-separated AMQP addresses to enable publishing and consumption. |
+| `rabbitmq_list_queues` | Optional: `nameContains`, `page`, `pageSize`. | Lists queue types, Ready and Unack counts, and consumer counts. |
+| `rabbitmq_inspect_queue` | Required: `queue`. | Returns counts, rates, arguments, and effective policies. Missing metrics remain null. |
+| `rabbitmq_list_bindings` | Required: exactly one of `queue` or `exchange`. Optional: `page`, `pageSize`. | Lists bindings for the selected queue or exchange. |
+| `rabbitmq_list_consumers` | Optional: `queue`, `page`, `pageSize`. | Lists ACK modes, prefetch, and channel identifiers. |
+| `rabbitmq_inspect_channel` | Required: `channelName`. | Returns channel-wide Unack counts and application connection details. |
+| `rabbitmq_sample_messages` | Required: `queue`. Optional: `count`. | Fetches Ready messages and requeues them. Defaults: count `3`, maximum `10`. Changes delivery state and may affect ordering; cannot inspect Unack bodies. |
+| `rabbitmq_publish_message` | Required: `exchange`, `routingKey`, `payload`. Optional: `encoding`, `headers`, `contentType`, `messageId`, `correlationId`, `persistent`. | Publishes with mandatory routing and publisher confirms. An empty exchange selects the default exchange. Headers have string values; `persistent` defaults to `true`. |
+| `rabbitmq_consume_messages` | Required: `queue`. Optional: `count`, `maxWaitMs`. | Pulls and ACKs messages, removing them. `ackStatus=SENT` is not a broker receipt or business processing guarantee. |
+
+RabbitMQ requires an HTTP Management API, including any reverse-proxy prefix in `managementUrl`. Management-only connections support inspection and sampling; publish/consume return `CAPABILITY_NOT_CONFIGURED` without AMQP addresses. When AMQP addresses are supplied, both connections must validate. Omitted AMQP credentials reuse the Management credentials from the same connection request, never from a previous target.
+
+### Kafka
+
+| Tool | Parameters | Behavior |
+| --- | --- | --- |
+| `kafka_connect` | Required: `bootstrapServers`. Optional: `securityProtocol`, `username`, `password`. | Validates metadata and activates/replaces Kafka. Supply comma-separated bootstrap servers. Connection success does not validate every resource permission. |
+| `kafka_list_topics` | Optional: `nameContains`, `includeInternal`, `limit`. | Lists topics; internal topics are excluded by default. |
+| `kafka_inspect_topic` | Required: `topic`. Optional: `limit`. | Returns partition leaders, replicas, ISR, and retained offset boundaries. |
+| `kafka_list_consumer_groups` | Optional: `nameContains`, `limit`. | Lists consumer groups. |
+| `kafka_inspect_consumer_group` | Required: `groupId`. Optional: `topic`, `limit`. | Returns members, assignments, committed/end offsets, and lag. Missing or out-of-range offsets are not zero lag. |
+| `kafka_read_records` | Required: `topic`, `partition`. Optional: `start`, `offset`, `timestampMs`, `count`, `maxWaitMs`. | Reads without group membership or commits. `start` accepts `latest` (default), `earliest`, `offset`, or `timestamp`. Latest reads a recent offset window, not necessarily exactly N records. |
+| `kafka_publish_record` | Required: `topic`, `payload`. Optional: `key`, `partition`, `encoding`, `headers`. | Publishes a record and returns the broker partition, offset, and timestamp. Keys and header values are strings. |
+| `kafka_consume_records` | Required: `topic`, `groupId`. Optional: `count`, `maxWaitMs`, `commit`, `offsetReset`. | Joins the group and may rebalance other consumers. `commit` defaults to `false`; when enabled, commits only returned records. `offsetReset` accepts `earliest` (default), `latest`, or `none`. |
+
+Kafka supports `PLAINTEXT` or `SASL_PLAINTEXT` with PLAIN. TLS, SCRAM, Kerberos, and OAuth are not supported. Lag is an offset distance, not proof of business processing or an exact message count. Producer idempotence does not deduplicate repeated MCP tool calls.
+
+For both RabbitMQ and Kafka, message encoding is `utf8` (default) or `base64`. Reads preserve message identifiers, correlation headers, and Kafka topic/partition/offset. JSON bodies remain original text. Default limits are: list size `50` (maximum `100`), reads/consumes `10` (maximum `100`), preview `4096` bytes, publish payload `65536` bytes, message result `1 MiB`, and wait `5s` (maximum `15s`). Configure limits under `omni.rabbitmq.limits` / `omni.kafka.limits` and timeouts under each connector's `timeouts` (`connect-ms`, `operation-ms`, `max-wait-ms`).
+
+Both connectors require existing topics/exchanges/queues and suitable permissions. Consumers are short-lived; no persistent subscription or cross-call ACK handle exists. Resource creation, purge, and offset reset operations are not exposed. Publisher confirmation does not mean business processing succeeded. Unknown publish, ACK, or commit outcomes must not be blindly retried.
+
 ## Calling tools
 
 The examples below are the `params` object of an MCP `tools/call` request. Pass `name` and `arguments` through your MCP client after initialization; these are not REST endpoints. For example, a full protocol request looks like:
@@ -459,6 +494,44 @@ Read back a value, check its TTL, or scan the example keys:
 {"name":"redis_scan_keys","arguments":{"pattern":"example:*","cursor":"0","count":100}}
 ```
 
+### RabbitMQ: connect, inspect, then publish
+
+```json
+{"name":"rabbitmq_connect","arguments":{"managementUrl":"http://rabbitmq.example.com:15672","username":"example-user","password":"<password>","amqpAddresses":"rabbitmq.example.com:5672"}}
+```
+
+Refresh the tool list after connecting, then inspect the target queue:
+
+```json
+{"name":"rabbitmq_inspect_queue","arguments":{"queue":"orders"}}
+```
+
+For backlog diagnostics, inspect consumers and their channels, then correlate sampled Ready messages with application logs using existing identifiers. Sampling requeues messages and may affect ordering. To exercise a partial business flow, publish a test event to an existing queue:
+
+```json
+{"name":"rabbitmq_publish_message","arguments":{"exchange":"","routingKey":"orders","payload":"{\"orderId\":123}","contentType":"application/json","correlationId":"debug-123"}}
+```
+
+### Kafka: connect, read, then simulate consumption
+
+```json
+{"name":"kafka_connect","arguments":{"bootstrapServers":"kafka.example.com:9092"}}
+```
+
+Refresh the tool list after connecting. Inspect consumer groups and partitions when diagnosing backlog, then read a recent offset window without joining a group or committing offsets:
+
+```json
+{"name":"kafka_read_records","arguments":{"topic":"orders","partition":0,"start":"latest","count":3}}
+```
+
+To simulate bounded group consumption, use a dedicated test group:
+
+```json
+{"name":"kafka_consume_records","arguments":{"topic":"orders","groupId":"debug-orders","commit":false,"count":3}}
+```
+
+Using a business Kafka group affects its assignment and, with `commit: true`, its future consumption position. Correlate returned records with application logs using their existing identifiers.
+
 ## Errors and write verification
 
 Check tool results for `isError`, `success`, and any returned error code before continuing. Connection success does not prove that every operation is authorized by the upstream service. Read configurations before replacing them and read back after publication to verify the returned content/hash. On `WRITE_RESULT_UNKNOWN`, inspect the target before retrying: the write may already have completed. On an uncertain transaction commit/rollback, inspect database state rather than replaying the write.
@@ -477,101 +550,3 @@ mvn clean package '-Dbase.export.path={yourExpectedPath}'
 The default export is `target/release/omni-connect-mcp/omni-connect-mcp.jar`. Replace `{yourExpectedPath}` with your desired absolute output directory; the second command exports the JAR to `{yourExpectedPath}/omni-connect-mcp/omni-connect-mcp.jar`. Maven exports only the runnable JAR. Copy the example YAML and required platform launchers separately when assembling a deployment from a local build. Intermediate artifacts remain in module `target/` directories.
 
 Tests are skipped by default. Run `mvn clean verify -DskipTests=false` to execute them and `python tests/test_release.py` with `JAVA_HOME` set to JDK 25 to exercise the packaged JAR and launchers.
-
-### RabbitMQ and Kafka (development diagnostics)
-
-The two independent modules add 17 tools. Only `rabbitmq_connect` and `kafka_connect`
-are advertised before activation; successful activation registers 8 RabbitMQ / 7 Kafka
-business tools. Refresh `tools/list`. All targets are process-wide, memory-only;
-failed replacements retain the old target. YAML `enabled` controls startup activation.
-With all connectors disabled there are 8 tools; all six enabled expose 43.
-
-RabbitMQ requires an HTTP Management API (including an optional reverse-proxy prefix).
-AMQP addresses are optional: management-only targets can inspect and sample, while
-publish/consume return `CAPABILITY_NOT_CONFIGURED`. If AMQP addresses are supplied,
-both connections must validate. Missing AMQP credentials reuse the credentials from
-this request, never from a previous target. Kafka supports `PLAINTEXT` or
-`SASL_PLAINTEXT` with PLAIN. TLS, SCRAM, Kerberos and OAuth are outside this version.
-
-| Tool | Arguments and behavior |
-|---|---|
-| `rabbitmq_connect` | Required `managementUrl`, `username`, `password`; optional `virtualHost` (default `/`), comma-separated `amqpAddresses`, `amqpUsername`, `amqpPassword`. |
-| `rabbitmq_list_queues` | Optional `nameContains`, `page`, `pageSize`; queue type, Ready, Unack, consumer counts. |
-| `rabbitmq_inspect_queue` | Required `queue`; counts, rates, arguments and effective policies. Missing metrics stay null. |
-| `rabbitmq_list_bindings` | Exactly one of `queue` or `exchange`; optional `page`, `pageSize`. |
-| `rabbitmq_list_consumers` | Optional `queue`, `page`, `pageSize`; ACK modes, prefetch and channel identifiers. |
-| `rabbitmq_inspect_channel` | Required `channelName`; channel-wide Unack and application connection details. |
-| `rabbitmq_sample_messages` | Required `queue`; optional `count` (default 3, max 10). Fetches Ready messages and requeues them; changes delivery state and may affect ordering. Cannot inspect Unack bodies. |
-| `rabbitmq_publish_message` | Required `exchange` (empty string allowed), `routingKey`, `payload`; optional `encoding`, string `headers`, `contentType`, `messageId`, `correlationId`, `persistent` (default true). Uses mandatory routing and publisher confirms. |
-| `rabbitmq_consume_messages` | Required `queue`; optional `count`, `maxWaitMs`. Pulls and ACKs messages, removing them. `ackStatus=SENT` is not a broker receipt or business processing guarantee. |
-| `kafka_connect` | Required comma-separated `bootstrapServers`; optional `securityProtocol`, `username`, `password`. Validates metadata, not every resource permission. |
-| `kafka_list_topics` | Optional `nameContains`, `includeInternal` (false), `limit`. |
-| `kafka_inspect_topic` | Required `topic`; optional `limit`; partition leaders, replicas, ISR and retained offset boundaries. |
-| `kafka_list_consumer_groups` | Optional `nameContains`, `limit`. |
-| `kafka_inspect_consumer_group` | Required `groupId`; optional `topic`, `limit`; members, assignments, committed/end offsets and lag. Missing or out-of-range offsets are not zero lag. |
-| `kafka_read_records` | Required `topic`, `partition`; optional `start` (`latest`, `earliest`, `offset`, `timestamp`), `offset`, `timestampMs`, `count`, `maxWaitMs`. No group membership or commits. Latest reads a recent offset window, not necessarily exactly N records. |
-| `kafka_publish_record` | Required `topic`, `payload`; optional string `key`, `partition`, `encoding`, string `headers`. Returns broker partition/offset/timestamp. |
-| `kafka_consume_records` | Required `topic`, `groupId`; optional `count`, `maxWaitMs`, `commit` (false), `offsetReset` (`earliest`, `latest`, `none`; default earliest). Joins that group and may rebalance other consumers. Commits only returned records when explicitly requested. |
-
-Message encoding is `utf8` (default) or `base64`. Reads preserve message identifiers,
-correlation headers and Kafka topic/partition/offset. JSON bodies remain original text.
-Defaults: list size 50/max 100; reads/consumes 10/max 100; preview 4096 bytes;
-publish payload max 65536 bytes; message result max 1 MiB; wait 5s/max 15s.
-Configure limits under `omni.rabbitmq.limits` / `omni.kafka.limits`, and timeouts
-under each connector's `timeouts` (`connect-ms`, `operation-ms`, `max-wait-ms`).
-
-Publisher confirmation does not mean business processing succeeded. Unknown publish,
-ACK or commit outcomes must not be blindly retried. Kafka producer idempotence does
-not deduplicate repeated MCP tool calls. Kafka lag is an offset distance, not proof of
-business processing or an exact message count. Consumers are short-lived; no persistent
-subscription or cross-call ACK handle exists. No resource creation, purge or offset reset
-is exposed. Existing topics/exchanges/queues and suitable permissions are required.
-
-Examples (connect first, refresh tools):
-
-```json
-{"name":"rabbitmq_connect","arguments":{"managementUrl":"http://localhost:15672","username":"debug","password":"<password>","amqpAddresses":"localhost:5672"}}
-{"name":"rabbitmq_inspect_queue","arguments":{"queue":"orders"}}
-{"name":"rabbitmq_publish_message","arguments":{"exchange":"","routingKey":"orders","payload":"{\"orderId\":123}","contentType":"application/json","correlationId":"debug-123"}}
-{"name":"kafka_connect","arguments":{"bootstrapServers":"localhost:9092"}}
-{"name":"kafka_read_records","arguments":{"topic":"orders","partition":0,"start":"latest","count":3}}
-{"name":"kafka_consume_records","arguments":{"topic":"orders","groupId":"debug-orders","commit":false,"count":3}}
-```
-
-For backlog diagnostics, inspect queues/groups, then consumers/channels or partitions,
-then correlate sampled records with application logs using their existing identifiers.
-To exercise a partial business flow, publish a test event or explicitly consume as a
-stand-in. Using a business Kafka group affects its assignment and, when commit=true,
-its future consumption position.
-
-Validation boundary: default tests use local HTTP fixtures and client test doubles;
-no broker/container is required. Core live scenarios also passed on RabbitMQ 3.6.5
-and a local PLAINTEXT Kafka broker whose server version was not identified. Kafka
-SASL/ACL, fault injection and additional broker-version compatibility remain unverified.
-
-Live broker tests are opt-in and require explicit permission to create and delete
-isolated test resources. Build the current JAR with `mvn package` first and use JDK 25
-and Python 3. From the repository root:
-
-```powershell
-# RabbitMQ: requires a management account that can create vhosts and permissions.
-$env:OMNI_RABBITMQ_ACCEPTANCE='true'
-$env:RABBITMQ_MANAGEMENT_URL='http://<host>:15672'
-$env:RABBITMQ_AMQP_ADDRESSES='<host>:5672'
-$env:RABBITMQ_USERNAME='<test-user>'
-$env:RABBITMQ_PASSWORD='<test-password>'
-mvn test -pl omni-connect-app -am '-DskipTests=false' '-Dtest=RabbitMqBrokerTest' '-Dsurefire.failIfNoSpecifiedTests=false'
-python tests/test_rabbitmq_stdio.py
-$env:OMNI_RABBITMQ_ACCEPTANCE=$null
-
-# Kafka: requires permissions to manage temporary topics and consumer groups.
-$env:OMNI_KAFKA_ACCEPTANCE='true'
-$env:KAFKA_BOOTSTRAP_SERVERS='localhost:9092'
-mvn test -pl omni-connect-app -am '-DskipTests=false' '-Dtest=KafkaBrokerTest' '-Dsurefire.failIfNoSpecifiedTests=false'
-$env:OMNI_KAFKA_ACCEPTANCE=$null
-```
-
-Fixtures use unique `omni-mcp-acceptance-` names and clean up their own resources.
-`KafkaBrokerTest` also runs `tests/test_kafka_stdio.py` against its fixtures and checks
-the resulting commit independently. Keep credentials out of Git and clear both opt-in
-flags before running the default offline suite.
