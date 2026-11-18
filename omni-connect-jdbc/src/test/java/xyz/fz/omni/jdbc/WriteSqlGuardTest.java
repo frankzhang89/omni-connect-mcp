@@ -42,6 +42,25 @@ class WriteSqlGuardTest {
                 IllegalArgumentException.class, () -> guard.validateDdl("GRANT ALL ON t TO u"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"DROP LOGIN app", "drop role app", "DROP SERVER  ROLE app", "DROP USER app"})
+    void routesAccountDropsThroughThePermissionTool(String sql) {
+        assertThrows(IllegalArgumentException.class, () -> guard.validateDdl(sql));
+    }
+
+    @Test
+    void rejectsBatchesWithoutSemicolons() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> guard.validateDdl("DROP TABLE first\nDROP TABLE second"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> guard.validateDml("UPDATE t SET a=1\nUPDATE t SET b=2"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ReadOnlySqlGuard().validate("SELECT 1\nSELECT 2"));
+    }
+
     @Test
     void rejectsMultipleStatementsAndComments() {
         assertThrows(

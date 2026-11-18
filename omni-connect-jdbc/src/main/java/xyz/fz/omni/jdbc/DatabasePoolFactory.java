@@ -14,6 +14,7 @@ import java.sql.Driver;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.SQLTimeoutException;
+import java.sql.Statement;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -190,7 +191,11 @@ public class DatabasePoolFactory {
                                         return proxy == args[0];
                                     }
                                     try {
-                                        return method.invoke(connection, args);
+                                        Object result = method.invoke(connection, args);
+                                        if (method.getName().equals("createStatement")) {
+                                            return protectStatement((Statement) result);
+                                        }
+                                        return result;
                                     } catch (InvocationTargetException error) {
                                         if (error.getCause() instanceof SQLException sql) {
                                             throw sanitized(sql);
@@ -205,6 +210,52 @@ public class DatabasePoolFactory {
             } catch (RuntimeException error) {
                 throw new SQLException("Database connection failed.", "08001");
             }
+        }
+
+        private static Statement protectStatement(Statement statement) {
+            // Hikari sees statement failures before the service layer and can log the full
+            // exception when evicting a connection. Plain statements can carry password literals.
+            return (Statement)
+                    Proxy.newProxyInstance(
+                            Statement.class.getClassLoader(),
+                            new Class<?>[] {Statement.class},
+                            (proxy, method, args) -> {
+                                switch (method.getName()) {
+                                    case "toString":
+                                        return "CredentialSafeStatement[redacted]";
+                                    case "hashCode":
+                                        return System.identityHashCode(proxy);
+                                    case "equals":
+                                        return proxy == args[0];
+                                    default:
+                                        try {
+                                            return method.invoke(statement, args);
+                                        } catch (InvocationTargetException error) {
+                                            if (error.getCause() instanceof SQLException sql) {
+                                                throw sanitizeStatementFailure(sql);
+                                            }
+                                            if (error.getCause() instanceof UnsupportedOperationException) {
+                                                throw new SQLFeatureNotSupportedException(
+                                                        "Database operation is not supported.", "0A000");
+                                            }
+                                            throw new SQLException("Database operation failed.");
+                                        }
+                                }
+                            });
+        }
+
+        private static SQLException sanitizeStatementFailure(SQLException error) {
+            var head = sanitized(error, null);
+            SQLException tail = head;
+            var next = error.getNextException();
+            // Retain the classifications Hikari inspects when deciding whether to evict.
+            for (int i = 1; next != null && i < 10; i++) {
+                var copy = sanitized(next, null);
+                tail.setNextException(copy);
+                tail = copy;
+                next = next.getNextException();
+            }
+            return head;
         }
 
         @Override
@@ -224,11 +275,15 @@ public class DatabasePoolFactory {
         }
 
         private static SQLException sanitized(SQLException error) {
+            return sanitized(error, "08001");
+        }
+
+        private static SQLException sanitized(SQLException error, String defaultState) {
             // Preserve only classification fields needed by DatabaseSwitchException;
             // original messages and causes may contain addresses or credentials.
             String state = error.getSQLState();
             if (state == null || !state.matches("[A-Z0-9]{5}")) {
-                state = "08001";
+                state = defaultState;
             }
             if (error instanceof SQLFeatureNotSupportedException) {
                 return new SQLFeatureNotSupportedException(

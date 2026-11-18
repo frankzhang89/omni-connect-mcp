@@ -29,6 +29,8 @@ Supported production targets are MySQL, Oracle, SQL Server, PostgreSQL, and Star
 - `db_query` accepts a single read-only SELECT or supported ordinary EXPLAIN. Bind values through `?` parameters. It rejects writes, locking clauses, SELECT INTO, and known side-effect functions. Database permissions remain authoritative.
 - `db_execute_dml` accepts one parameterized DML statement. RETURNING and OUTPUT are rejected; generated keys are returned only where the existing driver contract supports them.
 - `db_execute_ddl` accepts one supported DDL statement when `omni.jdbc.write.allow-ddl` is true. DROP and TRUNCATE may be irreversible.
+- `db_execute_permission` accepts one native privilege, account, or role statement when `omni.jdbc.write.allow-permissions` is true. It applies to the active data source outside explicit transactions. Verify the target database and principal before changing permissions or deleting accounts. MySQL `ON db2.table_name` selects `db2` regardless of the connection default. Password statements carry the SQL literal in the request. MySQL and StarRocks support host-qualified account identities.
+- `db_execute_supreme` sends raw SQL in one JDBC execution when `omni.jdbc.write.allow-supreme` is true. The database and driver determine what can run, including whether a batch is accepted. Each call begins in auto-commit and discards the connection afterwards. Query rows are arrays ordered by the returned `columns`.
 - `db_switch_datasource` validates and replaces the global JDBC target; it can also activate initially disabled JDBC. Failed candidates never replace the current pool. Existing work and explicit transactions stay pinned to the original target. Restart restores YAML.
 
 ### Explicit transactions

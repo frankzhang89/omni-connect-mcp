@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
 /** Runs the real HTTP/MCP/Hikari pipeline against an in-process JDBC test double. */
@@ -90,6 +91,8 @@ class DatabaseMcpIntegrationTest {
             assertEquals(21, tools.size());
             JsonNode switchTool = null;
             for (JsonNode tool : tools) {
+                assertNotEquals("db_execute_permission", tool.path("name").asString());
+                assertNotEquals("db_execute_supreme", tool.path("name").asString());
                 assertFalse(
                         tool.path("inputSchema").path("properties").has("expectedDatasourceId"));
                 if (tool.path("name").asString().equals("db_switch_datasource")) {
@@ -98,6 +101,16 @@ class DatabaseMcpIntegrationTest {
             }
             assertNotNull(switchTool);
             assertTrue(switchTool.path("inputSchema").path("properties").has("password"));
+            var disabledPermission =
+                    permissionCall(endpoint, session, "GRANT SELECT ON TABLE demo TO reader");
+            assertTrue(disabledPermission.has("error")
+                    || disabledPermission.path("result").path("isError").asBoolean());
+            var disabledSupreme =
+                    rpc(endpoint, session, "tools/call",
+                            Map.of("name", "db_execute_supreme", "arguments", Map.of("sql", "SELECT 1")))
+                            .body();
+            assertTrue(disabledSupreme.has("error")
+                    || disabledSupreme.path("result").path("isError").asBoolean());
 
             var before = call(endpoint, session, "db_query", Map.of("sql", "SELECT id FROM users"));
             assertEquals(1, before.path("rows").get(0).path("id").asInt());
@@ -401,6 +414,127 @@ class DatabaseMcpIntegrationTest {
         }
     }
 
+    @Test
+    void permissionToolActivatesWithJdbcAndRedactsDriverErrors(CapturedOutput output)
+            throws Exception {
+        Path config = configuration("one", TOKEN);
+        Files.writeString(
+                config,
+                Files.readString(config)
+                        .replace(
+                                "  jdbc:\n    enabled: true",
+                                """
+                                  jdbc:
+                                    enabled: false
+                                    write:
+                                      allow-ddl: false
+                                      allow-permissions: true"""
+                                        .indent(2).stripTrailing()));
+        ProbeDriver.lastPermission.set(null);
+        try (var context = start(config)) {
+            String endpoint = endpoint(context);
+            String session = initialize(endpoint);
+            String toolName = "db_execute_permission";
+            var initial = rpc(endpoint, session, "tools/list", Map.of()).body();
+            assertFalse(initial.toString().contains(toolName));
+            var switched =
+                    call(endpoint, session, "db_switch_datasource",
+                            Map.of("jdbcUrl", "jdbc:probe:two", "username", "user", "password", ""));
+            var tools =
+                    rpc(endpoint, session, "tools/list", Map.of())
+                            .body().path("result").path("tools");
+            var permission = tools.valueStream()
+                    .filter(tool -> tool.path("name").asString().equals(toolName))
+                    .findFirst().orElseThrow();
+            assertEquals(1, permission.path("inputSchema").path("properties").size());
+            assertTrue(permission.path("inputSchema").path("properties").has("sql"));
+
+            String password = "permission-secret;--#";
+            String sql = "CREATE USER app PASSWORD '" + password + "'";
+            var execution = call(endpoint, session, toolName, Map.of("sql", sql + ";"));
+            assertTrue(execution.path("success").asBoolean());
+            assertEquals(switched.path("datasourceId"), execution.path("datasourceId"));
+            assertFalse(execution.toString().contains(password));
+            assertEquals(sql, ProbeDriver.lastPermission.get());
+
+            var invalid = permissionCall(endpoint, session, sql + "; SELECT 1").path("result");
+            assertTrue(invalid.path("isError").asBoolean());
+            assertEquals("INVALID_PERMISSION_SQL", invalid.path("structuredContent").path("code").asString());
+            assertFalse(invalid.toString().contains(password));
+            assertEquals(sql, ProbeDriver.lastPermission.get());
+
+            var failed = permissionCall(endpoint, session, "ALTER USER blocked PASSWORD '" + password + "'")
+                    .path("result");
+            assertTrue(failed.path("isError").asBoolean());
+            var failure = failed.path("structuredContent");
+            assertEquals("PERMISSION_EXECUTION_FAILED", failure.path("code").asString());
+            assertTrue(failure.path("message").asString().contains("42501"));
+            assertFalse(failed.toString().contains(password));
+
+            var disconnected =
+                    permissionCall(endpoint, session, "ALTER USER disconnected PASSWORD '" + password + "'")
+                            .path("result");
+            assertTrue(disconnected.path("isError").asBoolean());
+            assertTrue(output.getAll().contains("marked as broken because of SQLSTATE(08006)"));
+            assertFalse(output.getAll().contains(password));
+        }
+    }
+
+    private JsonNode permissionCall(String endpoint, String session, String sql) throws Exception {
+        return rpc(endpoint, session, "tools/call",
+                Map.of("name", "db_execute_permission", "arguments", Map.of("sql", sql))).body();
+    }
+
+    @Test
+    void supremeExecutesRawSqlAndDiscardsSessionChanges() throws Exception {
+        String address = "jdbc:h2:mem:mcp_supreme_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
+        Path config = configuration("supreme-test", TOKEN);
+        Files.writeString(
+                config,
+                Files.readString(config)
+                        .replace("jdbc:probe:supreme-test", address)
+                        .replace("connection-timeout: 300", "connection-timeout: 2000")
+                        .replace(
+                                "  jdbc:\n    enabled: true",
+                                "  jdbc:\n    enabled: true\n    write:\n"
+                                        + "      allow-ddl: false\n      allow-supreme: true"));
+        try (var context = start(config)) {
+            String endpoint = endpoint(context);
+            String session = initialize(endpoint);
+            String toolName = "db_execute_supreme";
+            var tools = rpc(endpoint, session, "tools/list", Map.of()).body();
+            assertTrue(tools.toString().contains(toolName));
+            assertFalse(tools.toString().contains("db_execute_permission"));
+
+            var created = call(endpoint, session, toolName,
+                    Map.of("sql", "/* native DDL */ CREATE TABLE account (id INT);"));
+            var inserted = call(endpoint, session, toolName,
+                    Map.of("sql", "INSERT INTO account VALUES (1), (2);"));
+            assertEquals(created.path("datasourceId"), inserted.path("datasourceId"));
+            assertEquals(2, inserted.path("results").get(0).path("affectedRows").asInt());
+            var queried = call(endpoint, session, toolName,
+                    Map.of("sql", "SELECT id, id + 5 AS id FROM account ORDER BY id;"));
+            var data = queried.path("results").get(0);
+            assertEquals("ID", data.path("columns").get(1).asString());
+            assertEquals(2, data.path("rowCount").asInt());
+            assertEquals(6, data.path("rows").get(0).get(1).asInt());
+
+            call(endpoint, session, toolName, Map.of("sql", "CREATE SCHEMA ISOLATED"));
+            call(endpoint, session, toolName, Map.of("sql", "SET SCHEMA ISOLATED"));
+            var schema = call(endpoint, session, toolName, Map.of("sql", "SELECT CURRENT_SCHEMA"));
+            assertEquals("PUBLIC", schema.path("results").get(0).path("rows").get(0).get(0).asString());
+
+            var invalid = rpc(endpoint, session, "tools/call",
+                    Map.of("name", toolName,
+                            "arguments", Map.of("sql", "INVALID sql-literal-marker"))).body().path("result");
+            assertTrue(invalid.path("isError").asBoolean());
+            var failure = invalid.path("structuredContent");
+            assertEquals("SQL_EXECUTION_FAILED", failure.path("code").asString());
+            assertTrue(failure.path("message").asString().contains("SQLState: 42"));
+            assertFalse(invalid.toString().contains("sql-literal-marker"));
+        }
+    }
+
     private Path configuration(String database, String token) throws Exception {
         Path path = directory.resolve("config-" + database + "-" + System.nanoTime() + ".yml");
         Files.writeString(
@@ -580,6 +714,7 @@ class DatabaseMcpIntegrationTest {
 
     public static class ProbeDriver implements Driver {
         static final AtomicInteger attempts = new AtomicInteger();
+        static final AtomicReference<String> lastPermission = new AtomicReference<>();
 
         public ProbeDriver() {}
 
@@ -601,6 +736,23 @@ class DatabaseMcpIntegrationTest {
             when(connection.getSchema()).thenReturn(id == 1 ? "schema_one" : "schema_two");
             when(connection.getMetaData()).thenReturn(metadata);
             when(metadata.getSearchStringEscape()).thenReturn("\\");
+            var permission = mock(Statement.class);
+            when(connection.createStatement()).thenReturn(permission);
+            when(permission.execute(anyString()))
+                    .thenAnswer(call -> {
+                        String sql = call.getArgument(0);
+                        lastPermission.set(sql);
+                        if (sql.startsWith("ALTER USER blocked")) {
+                            throw new SQLException("driver rejected " + sql, "42501");
+                        }
+                        if (sql.startsWith("ALTER USER disconnected")) {
+                            var failure = new SQLException("driver rejected " + sql, "HY000");
+                            failure.setNextException(
+                                    new SQLException("connection disconnected during " + sql, "08006"));
+                            throw failure;
+                        }
+                        return false;
+                    });
             when(connection.prepareStatement(anyString()))
                     .thenAnswer(
                             call -> {

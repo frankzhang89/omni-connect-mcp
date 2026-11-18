@@ -68,6 +68,99 @@ class DatabaseAccessTest {
         return new DatabaseWriteService(manager(url, null), new WriteSqlGuard(), true, 10);
     }
 
+    @Test
+    void permissionUsesTheCurrentMysqlLeaseWithoutChangingCatalog() throws SQLException {
+        when(connection.getCatalog()).thenReturn("db1");
+        var statement = mock(Statement.class);
+        when(connection.createStatement()).thenReturn(statement);
+        var runtime = manager("jdbc:mysql://localhost/db1", null);
+        var lease = runtime.acquire();
+        clearInvocations(runtime);
+        var service = new DatabaseWriteService(runtime, new WriteSqlGuard(), false, 9);
+        String sql = "GRANT SELECT ON db2.xx TO 'reader'@'localhost'";
+
+        var result = service.executePermission(sql + ";");
+
+        assertEquals(false, result.isError());
+        assertEquals(Map.of("success", true, "datasourceId", "ds-test"), result.structuredContent());
+        verify(runtime).acquire();
+        var order = inOrder(connection, statement, lease);
+        order.verify(connection).setReadOnly(false);
+        order.verify(connection).setAutoCommit(true);
+        order.verify(statement).setEscapeProcessing(false);
+        order.verify(statement).setQueryTimeout(9);
+        order.verify(statement).execute(sql);
+        order.verify(statement).close();
+        order.verify(connection).close();
+        order.verify(lease).close();
+        verify(connection, never()).setCatalog(any());
+        verify(connection, never()).setSchema(any());
+    }
+
+    @Test
+    void invalidPermissionSqlNeverBorrowsAConnection() throws SQLException {
+        var runtime = manager("jdbc:sqlserver://localhost;databaseName=demo", null);
+        var lease = runtime.acquire();
+        var result =
+                new DatabaseWriteService(runtime, new WriteSqlGuard(), true, 10)
+                        .executePermission("CREATE USER app WITHOUT LOGIN\nSELECT 1");
+
+        assertEquals(true, result.isError());
+        assertTrue(result.toString().contains("INVALID_PERMISSION_SQL"));
+        verify(lease, never()).connection();
+        verify(lease).close();
+    }
+
+    @Test
+    void supremeForwardsRawSqlAndKeepsResultOrderAndDuplicateColumnNames() throws SQLException {
+        var runtime = manager("jdbc:sqlserver://localhost", null);
+        var lease = runtime.acquire();
+        var statement = mock(Statement.class);
+        var row = mock(ResultSet.class);
+        var columns = mock(ResultSetMetaData.class);
+        String sql = "  /* native batch */ custom syntax; select c, c;";
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.getLargeUpdateCount()).thenReturn(7L, -1L);
+        when(statement.getMoreResults()).thenReturn(true, false);
+        when(statement.getResultSet()).thenReturn(row);
+        when(row.getMetaData()).thenReturn(columns);
+        when(columns.getColumnCount()).thenReturn(2);
+        when(columns.getColumnLabel(anyInt())).thenReturn("c");
+        when(row.next()).thenReturn(true, false);
+        when(row.getObject(1)).thenReturn(42);
+        when(row.getObject(2)).thenReturn("second");
+
+        var result = new DatabaseSupremeTools(runtime, 2, 50, 8).execute(sql);
+
+        assertEquals(false, result.isError());
+        assertEquals(
+                Map.of(
+                        "success", true,
+                        "datasourceId", "ds-test",
+                        "resultsTruncated", false,
+                        "results", List.of(
+                                Map.of("type", "UPDATE", "affectedRows", 7L),
+                                Map.of(
+                                        "type", "QUERY",
+                                        "columns", List.of("c", "c"),
+                                        "rows", List.of(List.of(42, "second")),
+                                        "rowCount", 1,
+                                        "truncated", false,
+                                        "maxRows", 2))),
+                result.structuredContent());
+        var order = inOrder(statement, row, lease, connection);
+        order.verify(statement).setEscapeProcessing(false);
+        order.verify(statement).setQueryTimeout(8);
+        order.verify(statement).execute(sql);
+        order.verify(row).close();
+        order.verify(statement).close();
+        order.verify(lease).evict(connection);
+        order.verify(connection).close();
+        order.verify(lease).close();
+        verify(lease, never()).dialect();
+        verify(statement, never()).setMaxRows(anyInt());
+    }
+
     private DatabaseRuntimeManager manager(String url, String schema) {
         var manager = mock(DatabaseRuntimeManager.class);
         var lease = mock(DatabaseRuntimeManager.Lease.class);

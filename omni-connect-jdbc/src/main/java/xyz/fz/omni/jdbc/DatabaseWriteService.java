@@ -1,7 +1,11 @@
 package xyz.fz.omni.jdbc;
 
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
+import xyz.fz.omni.core.ConnectorRegistry;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -92,6 +96,35 @@ public class DatabaseWriteService {
             }
         } catch (SQLException ex) {
             throw databaseFailure("DDL execution failed", ex);
+        }
+    }
+
+    CallToolResult executePermission(String sql) {
+        try (var lease = manager.acquire()) {
+            String statementSql = PermissionSqlGuard.validate(sql, lease.dialect());
+            try (var connection = lease.connection()) {
+                lease.dialect().prepareWrite(connection);
+                try (var statement = connection.createStatement()) {
+                    statement.setEscapeProcessing(false);
+                    statement.setQueryTimeout(timeoutSeconds);
+                    statement.execute(statementSql);
+                }
+            }
+            return ConnectorRegistry.success(
+                    Map.of("success", true, "datasourceId", lease.datasourceId()));
+        } catch (PermissionSqlGuard.Rejected ex) {
+            return ConnectorRegistry.failure("INVALID_PERMISSION_SQL", ex.getMessage());
+        } catch (SQLException ex) {
+            // Driver errors can contain full SQL, including credentials. Only expose the SQLState.
+            String state = ex.getSQLState();
+            String message =
+                    state != null && state.matches("[0-9A-Z]{5}")
+                            ? "Permission statement failed (SQLState: " + state + ")."
+                            : "Permission statement failed.";
+            return ConnectorRegistry.failure("PERMISSION_EXECUTION_FAILED", message);
+        } catch (RuntimeException ex) {
+            return ConnectorRegistry.failure(
+                    "PERMISSION_EXECUTION_FAILED", "Permission statement could not be completed.");
         }
     }
 

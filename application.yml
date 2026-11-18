@@ -79,6 +79,8 @@ omni:
       max-cell-chars: 4000
     write:
       allow-ddl: true
+      allow-permissions: false
+      allow-supreme: false
     transaction:
       idle-timeout-seconds: 120
       max-lifetime-seconds: 600

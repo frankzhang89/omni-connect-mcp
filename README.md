@@ -110,7 +110,7 @@ spring:
     mcp:
       server:
         name: omni-connect-mcp
-        version: 0.2.0
+        version: 0.2.5
         stdio: false
         protocol: STREAMABLE
         type: SYNC
@@ -183,6 +183,8 @@ omni:
       max-cell-chars: 4000
     write:
       allow-ddl: true
+      allow-permissions: false
+      allow-supreme: false
     transaction:
       idle-timeout-seconds: 120
       max-lifetime-seconds: 600
@@ -216,7 +218,7 @@ omni:
 | `omni.jdbc` | Set `enabled: true` and connection URL/credentials for startup activation. The JDBC driver is selected from the URL. `max-active` and `min-idle` control the pool; `connection-timeout` is in milliseconds. |
 | `omni.jdbc.query` | Result row limit, query timeout in seconds, and maximum returned characters per cell. |
 | `omni.jdbc.switch` | Candidate connection and validation timeouts in seconds. |
-| `omni.jdbc.write` | `allow-ddl` enables or blocks DDL. The shipped value is `true`; set it to `false` to block the DDL tool. DML remains available subject to database permissions. |
+| `omni.jdbc.write` | `allow-ddl` defaults to `true`. Set `allow-permissions: true` for account and permission management, or `allow-supreme: true` for raw SQL execution. These switches are independent. |
 | `omni.jdbc.transaction` | Idle/lifetime/script timeouts in seconds, concurrent transaction limit, and SQL/statement limits. |
 | `omni.redis` | Set `enabled: true` with `connection.host`, `port`, optional credentials, and `database` for startup activation. Keep host and port separate. `limits` bounds database indices, scans, returned items, and value length. |
 
@@ -294,11 +296,35 @@ Compatibility tests model representative 1.4.x, 2.0/2.1, 2.2, 2.4, 3.0 and 3.2 c
 | `db_query` | Required: `sql`. Optional: `parameters`, `maxRows`. | Runs one read-only SELECT or WITH SELECT. Supports ordinary EXPLAIN SELECT on MySQL, PostgreSQL, and StarRocks. |
 | `db_execute_dml` | Required: `sql`. Optional: `parameters`. | Executes one INSERT, UPDATE, DELETE, MERGE, or UPSERT supported by the database; returns affected rows and supported generated keys. Executes independently of explicit transaction handles. |
 | `db_execute_ddl` | Required: `sql`. | Executes one CREATE, ALTER, DROP, TRUNCATE, or RENAME statement when DDL is enabled. |
+| `db_execute_permission` | Required: `sql`. | Executes one supported permission, account, or role statement when explicitly enabled. Returns `success` and `datasourceId`. |
+| `db_execute_supreme` | Required: `sql`. | Sends raw SQL unchanged to the active database when explicitly enabled. Returns ordered query results and update counts. |
 | `db_execute` | Required: `sql`. Optional: `transactionId`. | Opens an explicit transaction with `BEGIN`, executes SQL on its retained connection, and closes it with `COMMIT` or `ROLLBACK`. |
 
 Use the connected database's SQL dialect. `db_query` and `db_execute_dml` bind values with `?` placeholders and `parameters`. Neither RETURNING nor OUTPUT is supported by the DML tool. `db_query` rejects writes, locking clauses, EXPLAIN ANALYZE, and EXPLAIN options. Oracle/SQL Server estimated plans use `db_execute` instead.
 
 Explicit transactions belong to their MCP session and require `db_execute` for every statement; the other query/DML tools do not participate in them. Pass the ID returned by `BEGIN` on subsequent calls. Existing transactions retain their original data source across switches. Execution errors require rollback. StarRocks does not support opening these explicit transactions. Transaction scripts allow SELECT, supported EXPLAIN, DML, and TRUNCATE; other DDL and session-control statements are rejected. MySQL/Oracle TRUNCATE can implicitly commit and cannot be treated as rollback-safe.
+
+#### Permissions and accounts
+
+Set `omni.jdbc.write.allow-permissions: true` in the server configuration. The tool becomes discoverable when JDBC is active. It runs outside explicit transactions on the current process-wide data source and uses the database account already configured for that data source. The database enforces the account's authorization and version-specific syntax.
+
+| Database | Account, role, and source operations |
+| --- | --- |
+| MySQL | `CREATE/ALTER/DROP USER`, `RENAME USER`, `SET PASSWORD`, `CREATE/DROP ROLE`, and `SET DEFAULT ROLE`. Use `ACCOUNT LOCK/UNLOCK` for login status and `'user'@'host'` for the allowed source. `RENAME USER` can change the host of an existing account. |
+| PostgreSQL | `CREATE/ALTER/DROP USER` or `ROLE`. Use `LOGIN/NOLOGIN`, `PASSWORD`, and `VALID UNTIL` for login and password settings. `ALTER ROLE ... SET/RESET role` configures role selection at login, optionally within one database. Source rules are configured in `pg_hba.conf`. |
+| Oracle | `CREATE/ALTER/DROP USER` and `CREATE/ALTER/DROP ROLE`. Use `IDENTIFIED BY`, `ACCOUNT LOCK/UNLOCK`, and `DEFAULT ROLE` as supported by the account. Source rules are configured in Oracle Net. |
+| SQL Server | `CREATE/ALTER/DROP LOGIN` and `CREATE/ALTER/DROP USER` for SQL logins, mapped users, and contained users. Use `ALTER LOGIN ... ENABLE/DISABLE` for server login status. Supports `CREATE/DROP [SERVER] ROLE` and `ALTER [SERVER] ROLE ... ADD/DROP MEMBER`. Source rules are configured in the deployment firewall. |
+| StarRocks | `CREATE/ALTER/DROP USER`, `CREATE/DROP ROLE`, `SET PASSWORD`, and default role settings. Use `'user'@'host'` to restrict the source. Changing the host means creating the new identity, granting its permissions, and explicitly dropping the old identity. Account lock and unlock are unavailable. |
+
+All five dialects accept native `GRANT` and `REVOKE`. Submit one statement per call. Comments and SQL batches are rejected. Passwords are SQL literals in the MCP request and may be retained by the client. The tool omits raw SQL from its responses and redacts driver errors. Use standard doubled quotes for embedded quotes in ordinary string literals when the database's backslash behavior can vary by session.
+
+#### Raw SQL
+
+Set `omni.jdbc.write.allow-supreme: true` to expose `db_execute_supreme` when JDBC is active. The tool passes the entire `sql` string to JDBC in one execution. The driver and database handle syntax, multiple statements, transaction behavior, and access control.
+
+Each call starts in auto-commit and discards its connection afterwards. Session settings and open transactions cannot carry over to subsequent calls. Earlier statements in a batch may take effect even if execution later returns an error.
+
+The response includes `datasourceId`, `results`, and `resultsTruncated`. Query rows are arrays in `columns` order, with the configured query row and cell limits. Update counts are returned as `affectedRows`. The tool returns up to 20 JDBC results and uses the configured query timeout. Errors include the vendor code and SQLState when available.
 
 ### Redis
 
@@ -450,6 +476,12 @@ Use `COMMIT` instead of `ROLLBACK` when the changes should be saved. DDL is a se
 
 ```json
 {"name":"db_execute_ddl","arguments":{"sql":"CREATE TABLE example_items (id BIGINT PRIMARY KEY, name VARCHAR(100))"}}
+```
+
+With permission management enabled, explicit MySQL object names can target a different database from the connection default:
+
+```json
+{"name":"db_execute_permission","arguments":{"sql":"GRANT SELECT ON db2.example_items TO 'reader'@'192.0.2.10'"}}
 ```
 
 ### Redis: connect and write each supported type

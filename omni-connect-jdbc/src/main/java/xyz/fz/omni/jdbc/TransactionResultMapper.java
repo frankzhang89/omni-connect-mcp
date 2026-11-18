@@ -11,7 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Bounded JDBC result conversion for SELECT, RETURNING, and OUTPUT row sets. */
+/** Bounded JDBC result conversion for query and mutation row sets. */
 final class TransactionResultMapper {
     private final int maxRows;
     private final int maxCellChars;
@@ -22,23 +22,40 @@ final class TransactionResultMapper {
     }
 
     Map<String, Object> read(ResultSet result) throws SQLException {
+        return read(result, false);
+    }
+
+    Map<String, Object> readPositional(ResultSet result) throws SQLException {
+        return read(result, true);
+    }
+
+    private Map<String, Object> read(ResultSet result, boolean positional) throws SQLException {
         var metadata = result.getMetaData();
         List<String> columns = new ArrayList<>();
         for (int i = 1; i <= metadata.getColumnCount(); i++) {
             columns.add(metadata.getColumnLabel(i));
         }
-        List<Map<String, Object>> rows = new ArrayList<>();
+        List<Object> rows = new ArrayList<>();
         boolean truncated = false;
         while (result.next()) {
             if (rows.size() >= maxRows) {
                 truncated = true;
                 break;
             }
-            Map<String, Object> row = new LinkedHashMap<>();
-            for (int i = 1; i <= columns.size(); i++) {
-                row.put(columns.get(i - 1), value(result.getObject(i)));
+            if (positional) {
+                // Raw queries may return duplicate column labels.
+                List<Object> row = new ArrayList<>(columns.size());
+                for (int i = 1; i <= columns.size(); i++) {
+                    row.add(value(result.getObject(i)));
+                }
+                rows.add(row);
+            } else {
+                Map<String, Object> row = new LinkedHashMap<>();
+                for (int i = 1; i <= columns.size(); i++) {
+                    row.put(columns.get(i - 1), value(result.getObject(i)));
+                }
+                rows.add(row);
             }
-            rows.add(row);
         }
         return Map.of(
                 "type",

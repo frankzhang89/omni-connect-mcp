@@ -4,6 +4,7 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -26,11 +27,16 @@ public final class JdbcConnectorModule implements ConnectorModule {
             DatabaseTools reads,
             DatabaseWriteTools writes,
             DatabaseTransactionTools transactions,
+            ObjectProvider<DatabasePermissionTools> permissions,
+            ObjectProvider<DatabaseSupremeTools> supreme,
             @Value("${omni.jdbc.enabled:false}") boolean enabled) {
         this.registry = registry;
         this.runtime = runtime;
         this.enabled = enabled;
-        tools = ConnectorRegistry.specifications(reads, writes, transactions);
+        var handlers = new ArrayList<Object>(List.of(reads, writes, transactions));
+        permissions.ifAvailable(handlers::add);
+        supreme.ifAvailable(handlers::add);
+        tools = ConnectorRegistry.specifications(handlers.toArray());
     }
 
     public String id() {

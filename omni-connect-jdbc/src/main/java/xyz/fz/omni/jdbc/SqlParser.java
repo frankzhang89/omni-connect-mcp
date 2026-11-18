@@ -11,13 +11,22 @@ final class SqlParser {
     private SqlParser() {}
 
     static Statement parse(String sql) throws JSQLParserException {
+        // The single-statement entry point can return an AST for a valid prefix. Parse
+        // the whole input so drivers that accept batches never see an unchecked suffix.
+        Statements statements;
         try {
-            return CCJSqlParserUtil.parse(sql);
+            statements = CCJSqlParserUtil.parseStatements(sql);
         } catch (JSQLParserException ex) {
             // Retry bracket quoting only after ordinary parsing fails, because enabling
             // it first can reinterpret PostgreSQL array subscripts as quoted identifiers.
-            return CCJSqlParserUtil.parse(sql, parser -> parser.withSquareBracketQuotation(true));
+            statements =
+                    CCJSqlParserUtil.parseStatements(
+                            sql, parser -> parser.withSquareBracketQuotation(true));
         }
+        if (statements.size() != 1) {
+            throw new JSQLParserException("Expected exactly one SQL statement.");
+        }
+        return statements.get(0);
     }
 
     /** Parses the entire script before the first statement is allowed to execute. */

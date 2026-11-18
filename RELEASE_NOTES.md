@@ -1,5 +1,13 @@
 # Release Notes
 
+## v0.2.5
+
+- Added `db_execute_permission` for native grants, revocations, account and password administration, and role management across MySQL, PostgreSQL, Oracle, SQL Server, and StarRocks. Login status and host-qualified accounts follow each database's capabilities.
+- Added `db_execute_supreme` to pass raw SQL to JDBC and return ordered query results and update counts. Each call isolates session state by discarding its connection afterwards.
+- Both tools are disabled by default. Enable them independently with `omni.jdbc.write.allow-permissions` or `omni.jdbc.write.allow-supreme`.
+- Require complete SQL parsing in guarded JDBC tools and route account and role drops through the permission tool. Redact statement errors before the connection pool logs them.
+- Verified raw batches, session isolation, permission changes, account locking, and password rotation against MySQL 5.7.12.
+
 ## v0.2.0
 
 - Added RabbitMQ connectivity through the Management HTTP API and optional AMQP connections.

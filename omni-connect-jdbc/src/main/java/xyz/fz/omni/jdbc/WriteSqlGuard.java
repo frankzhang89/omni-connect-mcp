@@ -32,6 +32,9 @@ public class WriteSqlGuard {
     private static final Pattern FORBIDDEN =
             Pattern.compile(
                     "(?is)\\b(?:into\\s+(?:out|dump)file|load\\s+data|prepare\\s+|handler\\s+)|:=");
+    // JSqlParser uses Drop for account statements, including SQL Server DROP SERVER ROLE.
+    private static final Pattern ACCOUNT_DROP =
+            Pattern.compile("(?iU)^\\s*DROP\\s+(?:USER|LOGIN|ROLE|SERVER\\s+ROLE)\\b");
 
     /** Accepts supported row-changing statements whose results fit the update-count API. */
     public void validateDml(String sql) {
@@ -71,6 +74,9 @@ public class WriteSqlGuard {
     /** Checks statement type; the service separately enforces the configurable DDL switch. */
     public void validateDdl(String sql) {
         Statement statement = parseSingleStatement(sql);
+        if (statement instanceof Drop && ACCOUNT_DROP.matcher(sql).find()) {
+            throw new IllegalArgumentException("Use db_execute_permission for account and role changes.");
+        }
         // Only schema-changing statements are accepted for the DDL tool.
         if (!(statement instanceof CreateTable
                 || statement instanceof CreateView
