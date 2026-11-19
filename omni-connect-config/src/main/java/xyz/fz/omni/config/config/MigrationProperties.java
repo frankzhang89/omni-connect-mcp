@@ -28,7 +28,26 @@ public record MigrationProperties(
             String openapiToken,
             String env,
             String operator,
-            String releasedBy) {
+            String releasedBy,
+            String portalUsername,
+            String portalPassword) {
+        public Apollo(
+                String meta,
+                String appId,
+                String cluster,
+                String namespace,
+                String fileType,
+                String accessKey,
+                String portalUrl,
+                String openapiToken,
+                String env,
+                String operator,
+                String releasedBy) {
+            this(
+                    meta, appId, cluster, namespace, fileType, accessKey, portalUrl, openapiToken,
+                    env, operator, releasedBy, null, null);
+        }
+
         /** Retains the original read-only construction API. */
         public Apollo(
                 String meta,

@@ -29,6 +29,10 @@ public interface ConfigStore {
         ItemUpdateResult updateItem(ItemUpdateRequest request);
     }
 
+    interface AppDiscoverable extends ConfigStore {
+        AppIdListResult listAppIds();
+    }
+
     interface Discoverable extends ConfigStore {
         NamespaceListResult listNamespaces();
 

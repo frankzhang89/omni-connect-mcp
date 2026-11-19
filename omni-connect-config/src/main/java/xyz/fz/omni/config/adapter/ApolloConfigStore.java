@@ -21,11 +21,14 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 public class ApolloConfigStore
-        implements ConfigStore.Readable, ConfigStore.ItemReadable, ConfigStore.ItemUpdatable {
+        implements ConfigStore.Readable,
+                ConfigStore.ItemReadable,
+                ConfigStore.ItemUpdatable,
+                ConfigStore.AppDiscoverable {
     private final HttpTransport http;
     private final MigrationProperties.Apollo settings;
     private final ConfigFormatService formats;
-    private final ApolloItemClient items;
+    private final ApolloPortalClient portal;
 
     /** Binds the Apollo source settings, HTTP transport, and document codec. */
     public ApolloConfigStore(
@@ -33,7 +36,7 @@ public class ApolloConfigStore
         this.http = http;
         this.settings = properties.from().apollo();
         this.formats = formats;
-        this.items = new ApolloItemClient(http, this.settings);
+        this.portal = new ApolloPortalClient(http, this.settings);
     }
 
     /** Identifies this adapter as the Apollo provider. */
@@ -45,17 +48,23 @@ public class ApolloConfigStore
     /** Item updates are distinct from whole-document writes. */
     @Override
     public Set<Capability> capabilities() {
-        return Set.of(Capability.READ, Capability.READ_ITEM, Capability.UPDATE_ITEM);
+        return Set.of(
+                Capability.READ, Capability.READ_ITEM, Capability.UPDATE_ITEM, Capability.DISCOVER);
+    }
+
+    @Override
+    public AppIdListResult listAppIds() {
+        return portal.listAppIds();
     }
 
     @Override
     public ItemReadResult readItem(ItemReadRequest request) {
-        return items.readItem(request);
+        return portal.readItem(request);
     }
 
     @Override
     public ItemUpdateResult updateItem(ItemUpdateRequest request) {
-        return items.updateItem(request);
+        return portal.updateItem(request);
     }
 
     /**

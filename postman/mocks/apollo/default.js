@@ -10,6 +10,12 @@ http.createServer(async (req, res) => {
     res.writeHead(status, { 'Content-Type': 'application/json;charset=UTF-8' });
     res.end(JSON.stringify(body));
   };
+  // @endpoint GET /openapi/v1/apps
+  if (req.method === 'GET' && url.pathname === '/openapi/v1/apps') {
+    if (req.headers.authorization !== 'test-openapi-token') return reply(403, { message: 'denied' });
+    if (url.search) return reply(400, { message: 'Expected no query parameters' });
+    return reply(200, [{ appId: 'sq-order', name: 'Orders' }, { appId: 'other-app' }, { appId: 'sq-payment' }]);
+  }
   const portal = url.pathname.match(/^\/openapi\/v1\/envs\/([^/]+)\/apps\/([^/]+)\/clusters\/([^/]+)\/namespaces\/([^/]+)(.*)$/);
   // @endpoint GET /openapi/v1/envs/{env}/apps/{appId}/clusters/{cluster}/namespaces/{namespace}
   // @endpoint GET /openapi/v1/envs/{env}/apps/{appId}/clusters/{cluster}/namespaces/{namespace}/items/{key}

@@ -6,7 +6,7 @@ spring:
     mcp:
       server:
         name: omni-connect-mcp
-        version: 0.2.0
+        version: 0.3.0
         stdio: false
         protocol: STREAMABLE
         type: SYNC
@@ -49,6 +49,8 @@ omni:
       access-key: ${APOLLO_ACCESS_KEY:}
       portal-url: ${APOLLO_PORTAL_URL:}
       openapi-token: ${APOLLO_OPENAPI_TOKEN:}
+      portal-username: ${APOLLO_PORTAL_USERNAME:}
+      portal-password: ${APOLLO_PORTAL_PASSWORD:}
       env: ${APOLLO_ENV:}
       operator: ${APOLLO_OPERATOR:}
       released-by: ${APOLLO_RELEASED_BY:}

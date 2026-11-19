@@ -98,7 +98,7 @@ public final class ConfigConnectorModule implements ConnectorModule {
             description =
                     "Activate or replace the process-wide Apollo connection. Validates a published"
                         + " default namespace with a read. Optional Portal settings are checked by"
-                        + " item operations. Memory-only; no writes or YAML changes.",
+                        + " Portal operations. Memory-only; no writes or YAML changes.",
             annotations =
                     @McpTool.McpAnnotations(
                             readOnlyHint = false,
@@ -117,6 +117,10 @@ public final class ConfigConnectorModule implements ConnectorModule {
             @McpToolParam(description = "Optional Portal URL", required = false) String portalUrl,
             @McpToolParam(description = "Optional Portal OpenAPI token", required = false)
                     String openapiToken,
+            @McpToolParam(description = "Optional Portal username for app discovery", required = false)
+                    String portalUsername,
+            @McpToolParam(description = "Optional Portal password for app discovery", required = false)
+                    String portalPassword,
             @McpToolParam(description = "Optional Portal environment", required = false) String env,
             @McpToolParam(description = "Optional editor", required = false) String operator,
             @McpToolParam(description = "Optional publisher", required = false) String releasedBy) {
@@ -134,7 +138,9 @@ public final class ConfigConnectorModule implements ConnectorModule {
                                     openapiToken,
                                     env,
                                     operator,
-                                    releasedBy),
+                                    releasedBy,
+                                    portalUsername,
+                                    portalPassword),
                             true,
                             "RUNTIME"));
         } catch (MigrationException e) {

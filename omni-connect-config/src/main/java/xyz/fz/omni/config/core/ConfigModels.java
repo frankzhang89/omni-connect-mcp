@@ -31,6 +31,8 @@ public final class ConfigModels {
     public record DataIdCountResult(
             String namespace, String group, long totalCount, List<String> dataIds) {}
 
+    public record AppIdListResult(List<String> appIds) {}
+
     public record Location(
             Provider provider,
             String appId,

@@ -1,7 +1,21 @@
 purpose:
   stands_in_for: Apollo and Nacos 1.x/2.x/3.x HTTP APIs
-  unblocks: Local MCP configuration operations, Nacos version detection and fixed API routing checks
+  unblocks: Local MCP configuration operations, Apollo app discovery, Nacos version detection and fixed API routing checks
 assumptions:
+  - id: apollo-app-list
+    status: supported
+    claim: Apollo Portal GET /openapi/v1/apps without appIds returns an array of app objects visible to the caller.
+    reason: The official OpenAPI schema includes appId in each result. The Portal controller lists apps when appIds is omitted and applies any visibility checks for the caller.
+    verification: On 2026-11-19, McpIntegrationTest passed against the local HTTP fixture and the Postman simulation. The simulation recorded GET /openapi/v1/apps with HTTP 200, and the MCP result contained only the app IDs in response order. The local fixture also covered empty, denied, and malformed responses. Live Portal behavior remains unverified.
+    source: https://github.com/apolloconfig/apollo-openapi/blob/main/apollo-openapi.yaml; https://github.com/apolloconfig/apollo/blob/master/apollo-portal/src/main/java/com/ctrip/framework/apollo/openapi/v1/controller/AppController.java
+    updated_at: "2026-11-19"
+  - id: apollo-portal-session-app-list
+    status: supported
+    claim: The tested deployment accepts the built-in Portal sign-in form and returns the application list from GET /apps using the session cookie.
+    reason: The deployed Portal uses the username and password form at /signin, and the legacy Portal controller lists apps when appIds is omitted.
+    verification: On 2026-11-19, RuntimeConnectionsTest covered CSRF form submission, cookie rotation, cookie isolation, denied sessions, and Token precedence. The packaged MCP server used form login against the live Portal and returned 49 app IDs in the same order as its GET /apps response. Live Token authentication was not exercised.
+    source: https://github.com/apolloconfig/apollo/blob/v2.3.0/apollo-portal/src/main/java/com/ctrip/framework/apollo/portal/controller/AppController.java#L91-L97
+    updated_at: "2026-11-19"
   - id: nacos-namespace-list
     status: supported
     claim: The Nacos 2.x namespace list returns metadata and the configuration count for each namespace.

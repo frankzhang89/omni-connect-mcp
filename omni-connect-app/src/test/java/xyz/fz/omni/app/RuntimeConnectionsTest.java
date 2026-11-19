@@ -224,6 +224,62 @@ class RuntimeConnectionsTest {
     }
 
     @Test
+    void listsApolloAppIdsWithPortalLoginAndPrefersTheTokenWhenConfigured() throws Exception {
+        try (var peers = new UpstreamFixture();
+                var context = start(
+                        "--omni.config.apollo.enabled=true",
+                        "--omni.config.apollo.meta=" + peers.apollo(),
+                        "--omni.config.apollo.app-id=source-app",
+                        "--omni.config.apollo.portal-url=" + peers.apollo(),
+                        "--omni.config.apollo.portal-username=fixture-user",
+                        "--omni.config.apollo.portal-password=" + UpstreamFixture.PORTAL_PASSWORD);
+                var client = client(context)) {
+            var expected = JSON.readTree("{\"appIds\":[\"sq-order\",\"other-app\",\"sq-payment\"]}");
+            assertEquals(expected, call(client, "apollo_list_app_ids", Map.of()));
+            assertEquals(expected, call(client, "apollo_list_app_ids", Map.of()));
+            assertEquals(2, peers.portalLoginAttempts.get());
+            assertEquals(2, peers.portalSessionAppReads.get());
+            assertNull(peers.lastPortalPath);
+
+            peers.portalSessionExpired = true;
+            assertApolloListError(client, "AUTHENTICATION_FAILED");
+            peers.portalSessionExpired = false;
+            peers.portalLoginRedirect = "https://example.invalid/signin";
+            assertApolloListError(client, "UPSTREAM_ERROR");
+            assertEquals(3, peers.portalSessionAppReads.get());
+            peers.portalLoginRedirect = "/apollo/";
+
+            var settings = new HashMap<String, Object>(Map.of(
+                    "meta", peers.apollo(), "appId", "source-app", "portalUrl", peers.apollo(),
+                    "portalUsername", "fixture-user"));
+            call(client, "apollo_connect", settings);
+            assertApolloListError(client, "INVALID_ARGUMENT");
+            settings.put("portalPassword", "incorrect");
+            call(client, "apollo_connect", settings);
+            assertApolloListError(client, "AUTHENTICATION_FAILED");
+            assertEquals(5, peers.portalLoginAttempts.get());
+
+            settings.put("portalPassword", UpstreamFixture.PORTAL_PASSWORD);
+            settings.put("openapiToken", "invalid-token");
+            call(client, "apollo_connect", settings);
+            assertApolloListError(client, "AUTHENTICATION_FAILED");
+            settings.put("openapiToken", "test-openapi-token");
+            call(client, "apollo_connect", settings);
+            assertEquals(expected, call(client, "apollo_list_app_ids", Map.of()));
+            assertEquals(5, peers.portalLoginAttempts.get());
+            assertEquals(3, peers.portalSessionAppReads.get());
+        }
+    }
+
+    private static void assertApolloListError(McpSyncClient client, String code) {
+        var response = client.callTool(new CallToolRequest("apollo_list_app_ids", Map.of()));
+        assertTrue(response.isError());
+        assertEquals(code, JSON.valueToTree(response.structuredContent()).path("code").asString());
+        assertFalse(response.toString().contains(UpstreamFixture.PORTAL_PASSWORD));
+        assertFalse(response.toString().contains("SESSION="));
+    }
+
+    @Test
     void activatesOnTheSameSessionSharesAcrossClientsAndRetainsConnectionsAfterFailure()
             throws Exception {
         try (var peers = new UpstreamFixture();
@@ -232,10 +288,31 @@ class RuntimeConnectionsTest {
                 var second = client(context)) {
             assertEquals(8, names(first).size());
             assertFalse(names(first).contains("db_query"));
+            assertFalse(names(first).contains("apollo_list_app_ids"));
             call(first, "convert_config", Map.of("content", "answer=42"));
             call(first, "apollo_connect", Map.of("meta", peers.apollo(), "appId", "source-app"));
             assertTrue(names(second).contains("apollo_read_config"));
             call(second, "apollo_read_config", Map.of());
+            assertTrue(names(second).contains("apollo_list_app_ids"));
+            var missingPortal = second.callTool(new CallToolRequest("apollo_list_app_ids", Map.of()));
+            assertTrue(missingPortal.isError());
+            assertEquals(
+                    "INVALID_ARGUMENT",
+                    JSON.valueToTree(missingPortal.structuredContent()).path("code").asString());
+            assertNull(peers.lastPortalPath);
+            call(
+                    first,
+                    "apollo_connect",
+                    Map.of(
+                            "meta", peers.apollo(),
+                            "appId", "source-app",
+                            "portalUrl", peers.apollo() + "/",
+                            "openapiToken", "test-openapi-token"));
+            assertEquals(
+                    JSON.readTree("{\"appIds\":[\"sq-order\",\"other-app\",\"sq-payment\"]}"),
+                    call(second, "apollo_list_app_ids", Map.of()));
+            assertEquals("/apollo/openapi/v1/apps", peers.lastPortalPath);
+            assertEquals("test-openapi-token", peers.portalAuthorization);
             call(
                     first,
                     "nacos_connect",
@@ -260,7 +337,7 @@ class RuntimeConnectionsTest {
                     first,
                     "db_switch_datasource",
                     Map.of("jdbcUrl", url, "username", "sa", "password", ""));
-            assertEquals(21, names(second).size());
+            assertEquals(22, names(second).size());
             call(first, "db_execute_ddl", Map.of("sql", "CREATE TABLE omni_sample(id INT)"));
             var begin = call(first, "db_execute", Map.of("sql", "BEGIN"));
             String tx = begin.path("transactionId").asString();
@@ -286,7 +363,7 @@ class RuntimeConnectionsTest {
                 rs.next();
                 assertEquals(1, rs.getInt(1));
             }
-            assertEquals(21, names(first).size());
+            assertEquals(22, names(first).size());
             assertTrue(
                     call(first, "connector_status", Map.of())
                             .path("jdbc")
@@ -316,7 +393,7 @@ class RuntimeConnectionsTest {
     }
 
     @Test
-    void allCapabilitiesExposeTwentySixToolsAndRedisReconfigurationRetainsDataOnFailure()
+    void allCapabilitiesExposeToolsAndRedisReconfigurationRetainsDataOnFailure()
             throws Exception {
         try (var peers = new UpstreamFixture();
                 var redis = new RedisFixture();
@@ -338,7 +415,7 @@ class RuntimeConnectionsTest {
                             "password",
                             ""));
             call(client, "redis_connect", Map.of("host", "127.0.0.1", "port", redis.port()));
-            assertEquals(28, names(client).size());
+            assertEquals(29, names(client).size());
             call(
                     client,
                     "redis_write_key",
@@ -362,7 +439,7 @@ class RuntimeConnectionsTest {
                     client,
                     "redis_connect",
                     Map.of("host", "127.0.0.1", "port", redis.port(), "database", 1));
-            assertEquals(28, names(client).size());
+            assertEquals(29, names(client).size());
             assertFalse(
                     call(client, "redis_inspect_key", Map.of("key", "greeting"))
                             .path("exists")

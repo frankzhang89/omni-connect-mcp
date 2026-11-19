@@ -11,6 +11,8 @@ The tools never save runtime configuration to disk. Reconfiguration validates a 
 
 ## Apollo and Nacos
 
+`apollo_list_app_ids` takes no arguments and returns app IDs visible to the active Apollo Portal credentials. Set `portalUrl` and either `openapiToken` or both `portalUsername` and `portalPassword` when connecting. A configured Token takes precedence, and a rejected Token produces an authentication error. Form login is available for app listing. Filter the returned `appIds` in the agent when a user asks for a keyword or prefix, such as IDs starting with `sq`.
+
 `apollo_read_config` reads the published namespace, while `apollo_read_item` reads the current editing value through Portal OpenAPI. YAML namespace suffixes are appended when omitted. Item tools support properties only. Portal URL, OpenAPI consumer token, environment, and operator are separate from the published-read access key.
 
 `apollo_update_config` updates an existing key to the complete supplied replacement string. For a partial edit such as changing a port, read the item first and preserve the other parts yourself. Updates publish by default; `publish=false` only saves edits. The tool preserves the existing comment, checks other unpublished edits, and verifies the result. Concurrency checks and publication are not atomic.

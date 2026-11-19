@@ -15,6 +15,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Real HTTP test peers, based on documented Apollo and Nacos 1.x/2.x/3.x wire contracts. */
 public final class UpstreamFixture implements AutoCloseable {
+    public static final String PORTAL_PASSWORD = "fixture &+ password";
+    public final AtomicInteger portalLoginAttempts = new AtomicInteger();
+    public final AtomicInteger portalSessionAppReads = new AtomicInteger();
+    public volatile boolean portalSessionExpired;
+    public volatile String portalLoginRedirect = "/apollo/";
     public static final String YAML =
             "# agent-converted\r\napp:\r\n  name: '订单'\r\n  enabled: 'true'\r\n";
     private final HttpServer server;
@@ -68,6 +73,10 @@ public final class UpstreamFixture implements AutoCloseable {
     public final AtomicInteger releaseWrites = new AtomicInteger();
     public volatile String portalAuthorization;
     public volatile String lastPortalPath;
+    public volatile String appListBody =
+            """
+            [{"appId":"sq-order","name":"Orders"},{"appId":"other-app"},{"appId":"sq-payment"}]
+            """;
     public volatile JsonNodeHolder lastItemWrite;
     public volatile Map<String, Object> lastReleaseWrite;
     public volatile String namespaceFormat = "properties";
@@ -186,7 +195,21 @@ public final class UpstreamFixture implements AutoCloseable {
                         json.writeValueAsString(
                                 Map.of("configurations", values, "releaseKey", "release-1")),
                         true);
-            } else if (path.startsWith("/apollo/openapi/v1/envs/")) {
+            } else if (path.equals("/apollo/signin")) {
+                signin(exchange, form);
+            } else if (path.equals("/apollo/apps")) {
+                portalSessionAppReads.incrementAndGet();
+                if (exchange.getRequestMethod().equals("GET")
+                        && exchange.getRequestURI().getRawQuery() == null
+                        && !portalSessionExpired
+                        && "SESSION=authenticated".equals(exchange.getRequestHeaders().getFirst("Cookie"))) {
+                    respond(exchange, 200, appListBody, true);
+                } else {
+                    exchange.getResponseHeaders().set("Location", "/apollo/signin");
+                    respond(exchange, 302, "", false);
+                }
+            } else if (path.equals("/apollo/openapi/v1/apps")
+                    || path.startsWith("/apollo/openapi/v1/envs/")) {
                 portal(exchange, path, rawBody);
             } else if (path.startsWith("/nacos/")) {
                 nacos(exchange, path, query, form);
@@ -196,6 +219,32 @@ public final class UpstreamFixture implements AutoCloseable {
         } finally {
             exchange.close();
         }
+    }
+
+    private void signin(HttpExchange exchange, Map<String, String> form) throws IOException {
+        String cookie = exchange.getRequestHeaders().getFirst("Cookie");
+        if (exchange.getRequestMethod().equals("GET") && cookie == null) {
+            exchange.getResponseHeaders().add("Set-Cookie", "SESSION=before-login; Path=/apollo");
+            respond(exchange, 200, """
+                    <form method="post">
+                      <input name="username"><input name="password" type="password">
+                      <input value='csrf&amp;value' name='_csrf' type="hidden">
+                    </form>
+                    """, false);
+            return;
+        }
+        portalLoginAttempts.incrementAndGet();
+        if (exchange.getRequestMethod().equals("POST")
+                && "SESSION=before-login".equals(cookie)
+                && "fixture-user".equals(form.get("username"))
+                && PORTAL_PASSWORD.equals(form.get("password"))
+                && "csrf&value".equals(form.get("_csrf"))) {
+            exchange.getResponseHeaders().add("Set-Cookie", "SESSION=authenticated; Path=/apollo");
+            exchange.getResponseHeaders().set("Location", portalLoginRedirect);
+        } else {
+            exchange.getResponseHeaders().set("Location", "/apollo/signin?error");
+        }
+        respond(exchange, 302, "", false);
     }
 
     /** Models Portal editing items and independent published release snapshots. */
@@ -209,6 +258,15 @@ public final class UpstreamFixture implements AutoCloseable {
         }
         if (!"test-openapi-token".equals(portalAuthorization)) {
             respond(exchange, 401, "denied", false);
+            return;
+        }
+        if (path.equals("/apollo/openapi/v1/apps")) {
+            if (!exchange.getRequestMethod().equals("GET")
+                    || exchange.getRequestURI().getRawQuery() != null) {
+                respond(exchange, 400, "Expected GET without query parameters", false);
+                return;
+            }
+            respond(exchange, 200, appListBody, true);
             return;
         }
         int suffixAt = path.indexOf("/items/");

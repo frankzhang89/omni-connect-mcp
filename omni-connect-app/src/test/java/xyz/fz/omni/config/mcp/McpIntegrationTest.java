@@ -90,7 +90,7 @@ class McpIntegrationTest {
 
     /** Checks tool discovery, required arguments, and the publication mutation hint over MCP. */
     @Test
-    void listsExactlyEightToolsWithRequiredInputsAndMutationHints() {
+    void listsConfigurationToolsWithRequiredInputsAndMutationHints() {
         var tools =
                 client.listTools().tools().stream()
                         .filter(
@@ -108,6 +108,7 @@ class McpIntegrationTest {
         assertThat(tools)
                 .extracting(Tool::name)
                 .containsExactlyInAnyOrder(
+                        "apollo_list_app_ids",
                         "apollo_read_config",
                         "apollo_read_item",
                         "apollo_update_config",
@@ -116,6 +117,14 @@ class McpIntegrationTest {
                         "nacos_list_namespaces",
                         "nacos_list_and_count_data_ids",
                         "convert_config");
+        Tool apps =
+                tools.stream()
+                        .filter(t -> t.name().equals("apollo_list_app_ids"))
+                        .findFirst()
+                        .orElseThrow();
+        assertThat((Map<?, ?>) apps.inputSchema().getOrDefault("properties", Map.of())).isEmpty();
+        assertThat(apps.annotations().readOnlyHint()).isTrue();
+        assertThat(apps.annotations().destructiveHint()).isFalse();
         assertThat(
                         tools.stream()
                                 .filter(
@@ -161,6 +170,38 @@ class McpIntegrationTest {
                         ((Map<?, ?>) publish.inputSchema().get("properties"))
                                 .keySet().stream().map(Object::toString).toList())
                 .contains("fileType", "group", "namespace");
+    }
+
+    @Test
+    void listsAllApolloAppIdsInPortalOrder() {
+        assertThat(call("apollo_list_app_ids", Map.of()))
+                .isEqualTo(json.readTree("""
+                        {"appIds":["sq-order","other-app","sq-payment"]}
+                        """));
+    }
+
+    @Test
+    void handlesEmptyApolloAppListsAndPortalErrors() {
+        Assumptions.assumeTrue(upstream != null, "Requires configurable local fixture");
+        String original = upstream.appListBody;
+        try {
+            upstream.appListBody = "[]";
+            assertThat(call("apollo_list_app_ids", Map.of()))
+                    .isEqualTo(json.readTree("{\"appIds\":[]}"));
+            for (int status : List.of(401, 403)) {
+                upstream.portalStatus = status;
+                assertError("apollo_list_app_ids", Map.of(), "AUTHENTICATION_FAILED");
+            }
+            upstream.portalStatus = 200;
+            for (String malformed : List.of(
+                    "PRIVATE_SECRET", "{}", "[{}]", "[{\"appId\":1}]", "[{\"appId\":\" \"}]")) {
+                upstream.appListBody = malformed;
+                assertError("apollo_list_app_ids", Map.of(), "UPSTREAM_ERROR");
+            }
+        } finally {
+            upstream.appListBody = original;
+            upstream.portalStatus = 200;
+        }
     }
 
     @Test

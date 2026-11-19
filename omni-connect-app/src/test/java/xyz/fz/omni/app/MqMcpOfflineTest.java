@@ -122,7 +122,9 @@ class MqMcpOfflineTest {
                             ""));
             RuntimeConnectionsTest.call(
                     first, "redis_connect", Map.of("host", "127.0.0.1", "port", redis.port()));
-            assertEquals(43, RuntimeConnectionsTest.names(second).size());
+            var allTools = RuntimeConnectionsTest.names(second);
+            assertEquals(44, allTools.size());
+            assertTrue(allTools.contains("apollo_list_app_ids"));
 
         } finally {
             server.stop(0);

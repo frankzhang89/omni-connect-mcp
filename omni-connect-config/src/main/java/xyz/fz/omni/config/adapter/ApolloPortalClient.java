@@ -17,14 +17,43 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/** Portal item operations are separate from the ConfigService published-document protocol. */
-final class ApolloItemClient {
+/** Calls Apollo Portal using the active connection's Portal settings. */
+final class ApolloPortalClient {
     private final HttpTransport http;
     private final MigrationProperties.Apollo settings;
 
-    ApolloItemClient(HttpTransport http, MigrationProperties.Apollo settings) {
+    ApolloPortalClient(HttpTransport http, MigrationProperties.Apollo settings) {
         this.http = http;
         this.settings = settings;
+    }
+
+    AppIdListResult listAppIds() {
+        String portal = portalBaseUrl();
+        String token = settings.openapiToken();
+        HttpTransport.Response response;
+        if (token != null && !token.isBlank()) {
+            response = http.get(URI.create(portal + "/openapi/v1/apps"), headers());
+        } else {
+            String username =
+                    required(settings.portalUsername(), "omni.config.apollo.portal-username");
+            String password =
+                    required(settings.portalPassword(), "omni.config.apollo.portal-password");
+            response = new ApolloPortalSession(http, portal).listApps(username, password);
+        }
+        http.requireSuccess(response);
+        JsonNode apps = http.json(response.body());
+        if (!apps.isArray()) {
+            throw new MigrationException(UPSTREAM_ERROR, "Apollo app list is not an array");
+        }
+        List<String> appIds = new ArrayList<>();
+        for (JsonNode app : apps) {
+            String appId = string(app, "appId");
+            if (appId.isBlank()) {
+                throw new MigrationException(UPSTREAM_ERROR, "Apollo response contains a blank appId");
+            }
+            appIds.add(appId);
+        }
+        return new AppIdListResult(List.copyOf(appIds));
     }
 
     /** Shared by the standalone read tool and both update verification reads. */
@@ -247,8 +276,7 @@ final class ApolloItemClient {
     private URI uri(ItemReadRequest request, String suffix) {
         Location location = request.location();
         return URI.create(
-                HttpTransport.baseUrl(
-                                required(settings.portalUrl(), "omni.config.apollo.portal-url"))
+                portalBaseUrl()
                         + "/openapi/v1/envs/"
                         + segment(request.env())
                         + "/apps/"
@@ -258,6 +286,11 @@ final class ApolloItemClient {
                         + "/namespaces/"
                         + segment(location.namespace())
                         + suffix);
+    }
+
+    private String portalBaseUrl() {
+        return HttpTransport.baseUrl(
+                required(settings.portalUrl(), "omni.config.apollo.portal-url"));
     }
 
     private static String segment(String value) {

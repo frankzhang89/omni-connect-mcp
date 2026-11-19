@@ -2,13 +2,13 @@
 
 One MCP server for Apollo, Nacos, relational databases, standalone Redis, RabbitMQ, and Kafka. It runs from one executable JAR with one external `application.yml` and supports both stdio and Streamable HTTP.
 
-See [Release Notes](RELEASE_NOTES.md) for version history. Record post-release changes under `Unreleased`.
+The current version is [v0.3.0](RELEASE_NOTES.md#v030). See the [Release Notes](RELEASE_NOTES.md) for version history. Record post-release changes under `Unreleased`.
 
 ## Capabilities
 
 | Connector | Capabilities |
 | --- | --- |
-| Apollo | Read published configurations; read and update existing properties items through Portal OpenAPI; optionally publish updates. |
+| Apollo | List app IDs with a Portal Token or account credentials, read published configurations, and read, update, or publish existing properties items through Portal OpenAPI. |
 | Nacos | Discover namespaces and configuration IDs; read, create, and replace complete configuration documents. Detects Nacos 1.x/2.x/3.x once per connection and selects version-specific APIs. |
 | JDBC | Connect to MySQL, PostgreSQL, Oracle, SQL Server, and StarRocks; inspect metadata; query data; execute DML and DDL; manage explicit transactions and switch databases at runtime. |
 | Redis | Connect to standalone Redis; scan keys; inspect type, TTL, and size; read and write string, list, set, hash, and sorted-set values; manage expiry and logical database selection. |
@@ -110,7 +110,7 @@ spring:
     mcp:
       server:
         name: omni-connect-mcp
-        version: 0.2.5
+        version: 0.3.0
         stdio: false
         protocol: STREAMABLE
         type: SYNC
@@ -153,6 +153,8 @@ omni:
       access-key: ${APOLLO_ACCESS_KEY:}
       portal-url: ${APOLLO_PORTAL_URL:}
       openapi-token: ${APOLLO_OPENAPI_TOKEN:}
+      portal-username: ${APOLLO_PORTAL_USERNAME:}
+      portal-password: ${APOLLO_PORTAL_PASSWORD:}
       env: ${APOLLO_ENV:}
       operator: ${APOLLO_OPERATOR:}
       released-by: ${APOLLO_RELEASED_BY:}
@@ -213,7 +215,7 @@ omni:
 | --- | --- |
 | `omni.auth` | HTTP authentication. `enabled: true` requires a nonempty `token`; clients send it as a Bearer token. Stdio does not require it. |
 | `omni.config.http` | Apollo/Nacos connection and read timeouts, expressed as durations such as `3s`. |
-| `omni.config.apollo` | Set `enabled: true`, `meta`, and `app-id` for startup activation. Published reads use `cluster`, `namespace`, `file-type`, and optional signing `access-key`. Item operations additionally require `portal-url`, `openapi-token`, and `env`; updates require an operator. |
+| `omni.config.apollo` | Set `enabled: true`, `meta`, and `app-id` for startup activation. Published reads use `cluster`, `namespace`, `file-type`, and optional signing `access-key`. App listing requires `portal-url` and either `openapi-token` or both `portal-username` and `portal-password`. Item operations require `portal-url`, `openapi-token`, and `env`. Updates also require an operator. |
 | `omni.config.nacos` | Set `enabled: true` and `server-addr` for startup activation. Use one origin such as `http://nacos.example.com:8848`; set `context-path` separately, normally `/nacos`. Supply credentials when authentication is enabled. `namespace` is an ID; empty string or `public` selects public. `group` and `file-type` provide operation defaults. |
 | `omni.jdbc` | Set `enabled: true` and connection URL/credentials for startup activation. The JDBC driver is selected from the URL. `max-active` and `min-idle` control the pool; `connection-timeout` is in milliseconds. |
 | `omni.jdbc.query` | Result row limit, query timeout in seconds, and maximum returned characters per cell. |
@@ -255,7 +257,8 @@ Parameter names in tool calls use camelCase; YAML configuration uses kebab-case.
 
 | Tool | Parameters | Behavior |
 | --- | --- | --- |
-| `apollo_connect` | Required: `meta`, `appId`. Optional: `cluster`, `namespace`, `fileType`, `accessKey`, `portalUrl`, `openapiToken`, `env`, `operator`, `releasedBy`. | Validates a published namespace and activates/replaces Apollo. Defaults: cluster `default`, namespace `application`, format `properties`. Portal permissions are checked by item operations. |
+| `apollo_connect` | Required: `meta`, `appId`. Optional: `cluster`, `namespace`, `fileType`, `accessKey`, `portalUrl`, `openapiToken`, `portalUsername`, `portalPassword`, `env`, `operator`, `releasedBy`. | Validates a published namespace and activates/replaces Apollo. Defaults are cluster `default`, namespace `application`, and format `properties`. Portal credentials are validated on use. |
+| `apollo_list_app_ids` | None | Returns `appIds` in Portal order for all applications visible to the active Portal credentials. Filter by keyword or prefix in the caller. |
 | `apollo_read_config` | Optional: `appId`, `cluster`, `namespace`, `fileType`. | Reads published content with location, release key, and SHA-256. Omitted identifiers use active connection defaults. |
 | `apollo_read_item` | Required: `key`. Optional: `appId`, `cluster`, `namespace`, `fileType`, `env`. | Reads a properties item's current editing value, comment, and metadata through Portal OpenAPI; it may differ from the published value. |
 | `apollo_update_config` | Required: `key`, `value`. Optional: `appId`, `cluster`, `namespace`, `fileType`, `env`, `publish`, `operator`, `releasedBy`, `releaseTitle`, `releaseComment`. | Updates an existing properties item to the complete supplied value and preserves its comment. Publishes by default; `publish: false` only saves the editing value. |
@@ -394,7 +397,13 @@ The examples below are the `params` object of an MCP `tools/call` request. Pass 
 {"name":"apollo_read_config","arguments":{}}
 ```
 
-For item operations, include Portal settings in `apollo_connect`: `portalUrl`, `openapiToken`, `env`, and `operator`, plus `releasedBy` when a separate publisher is required. Then read the existing item before changing it:
+Set `portalUrl` to the base URL of the Apollo management UI, including its deployment path when present. For app listing, supply `openapiToken` to use Portal OpenAPI, or supply `portalUsername` and `portalPassword` to use the built-in Portal sign-in form. A configured Token takes precedence. If the Portal rejects the Token, the tool reports an authentication error. To find IDs starting with `sq`, filter the returned `appIds` in the agent.
+
+```json
+{"name":"apollo_list_app_ids","arguments":{}}
+```
+
+For item operations, set `openapiToken` and `env`. Set `operator` for updates, plus `releasedBy` when a separate publisher is required. Read the existing item before changing it.
 
 ```json
 {"name":"apollo_read_item","arguments":{"key":"service.url"}}

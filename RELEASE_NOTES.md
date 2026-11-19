@@ -1,5 +1,11 @@
 # Release Notes
 
+## v0.3.0
+
+- Added the read-only `apollo_list_app_ids` tool. It returns all app IDs visible to the configured Portal credentials in Portal response order. Apply keyword and prefix filters in the caller.
+- App discovery supports an OpenAPI Token or the Portal's built-in username and password sign-in. A configured Token takes precedence and authentication failures are reported directly. Configuration item operations continue to use OpenAPI Token authentication.
+- Verified app discovery with the packaged MCP server against a live Apollo Portal using account credentials. All 49 app IDs matched the Portal response in order. Token authentication was verified against a local Postman simulation.
+
 ## v0.2.5
 
 - Added `db_execute_permission` for native grants, revocations, account and password administration, and role management across MySQL, PostgreSQL, Oracle, SQL Server, and StarRocks. Login status and host-qualified accounts follow each database's capabilities.

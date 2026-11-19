@@ -44,7 +44,7 @@ public class HttpTransport implements AutoCloseable {
         ownedClient = http;
     }
 
-    public record Response(int status, String body) {}
+    public record Response(int status, String body, HttpHeaders headers) {}
 
     /** Executes a read request while preserving its status for provider-specific handling. */
     public Response get(URI uri, HttpHeaders headers) {
@@ -98,7 +98,8 @@ public class HttpTransport implements AutoCloseable {
                                     response.getStatusCode().value(),
                                     new String(
                                             response.getBody().readAllBytes(),
-                                            StandardCharsets.UTF_8)));
+                                            StandardCharsets.UTF_8),
+                                    HttpHeaders.readOnlyHttpHeaders(response.getHeaders())));
         } catch (ResourceAccessException e) {
             // A transport failure cannot tell us whether the server committed the document.
             if (configWrite)

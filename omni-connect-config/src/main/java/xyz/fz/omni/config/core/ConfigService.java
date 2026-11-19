@@ -35,6 +35,15 @@ public class ConfigService {
         return readable(Provider.APOLLO).read(apolloRequest(appId, cluster, namespace, fileType));
     }
 
+    public AppIdListResult apolloListAppIds() {
+        ConfigStore store = stores.get(Provider.APOLLO);
+        if (store instanceof ConfigStore.AppDiscoverable discovery
+                && store.capabilities().contains(Capability.DISCOVER)) {
+            return discovery.listAppIds();
+        }
+        throw new MigrationException(UNSUPPORTED_CAPABILITY, "Apollo app discovery is not implemented");
+    }
+
     /** Uses the same identity/default rules for document and item operations. */
     private ReadRequest apolloRequest(
             String appId, String cluster, String namespace, String fileType) {

@@ -22,6 +22,16 @@ public class ConfigTools {
         this.service = service;
     }
 
+    @McpTool(
+            name = "apollo_list_app_ids",
+            description =
+                    "List all app IDs visible to the active Apollo Portal credentials. Returns appIds"
+                        + " in Portal order. Apply keyword or prefix filters to the returned list.",
+            annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false))
+    public CallToolResult apolloListAppIds() {
+        return result(service::apolloListAppIds);
+    }
+
     /** Exposes published Apollo reads with optional overrides for source identifiers and format. */
     @McpTool(
             name = "apollo_read_config",
