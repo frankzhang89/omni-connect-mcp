@@ -210,6 +210,44 @@ omni:
       max-scan-count: 100
       max-items: 100
       max-value-chars: 4000
+  rabbitmq:
+    enabled: false
+    connection:
+      management-url: ${RABBITMQ_MANAGEMENT_URL:http://localhost:15672}
+      username: ${RABBITMQ_USERNAME:}
+      password: ${RABBITMQ_PASSWORD:}
+      virtual-host: ${RABBITMQ_VHOST:/}
+      amqp:
+        addresses: ${RABBITMQ_AMQP_ADDRESSES:}
+        # Omit username/password here to reuse this generation's management credentials.
+    timeouts:
+      connect-ms: 5000
+      operation-ms: 10000
+      max-wait-ms: 15000
+    limits:
+      max-items: 100
+      max-messages: 100
+      max-samples: 10
+      preview-bytes: 4096
+      max-payload-bytes: 65536
+      max-response-bytes: 1048576
+  kafka:
+    enabled: false
+    connection:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      security-protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+      username: ${KAFKA_USERNAME:}
+      password: ${KAFKA_PASSWORD:}
+    timeouts:
+      connect-ms: 5000
+      operation-ms: 10000
+      max-wait-ms: 15000
+    limits:
+      max-items: 100
+      max-messages: 100
+      preview-bytes: 4096
+      max-payload-bytes: 65536
+      max-response-bytes: 1048576
 ```
 
 ### Connection and execution settings
@@ -226,6 +264,8 @@ omni:
 | `omni.jdbc.write` | `allow-ddl` defaults to `true`. Set `allow-permissions: true` for account and permission management, or `allow-raw-sql: true` for raw SQL execution. These switches are independent. |
 | `omni.jdbc.transaction` | Idle/lifetime/script timeouts in seconds, concurrent transaction limit, and SQL/statement limits. |
 | `omni.redis` | Set `enabled: true` with `connection.host`, `port`, optional credentials, and `database` for startup activation. Keep host and port separate. `limits` bounds database indices, scans, returned items, and value length. |
+| `omni.rabbitmq` | Set `enabled: true` with the Management URL, credentials, and virtual host for startup activation. Set `connection.amqp.addresses` to enable publishing and ACK consumption. |
+| `omni.kafka` | Set `enabled: true` with `connection.bootstrap-servers` for startup activation. Use `PLAINTEXT` or `SASL_PLAINTEXT` with PLAIN credentials. |
 
 For example, a MySQL URL is `jdbc:mysql://mysql.example.com:3306/example?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC`. Set `JDBC_URL`, `JDBC_USERNAME`, and `JDBC_PASSWORD`, then change `omni.jdbc.enabled` to `true` to connect at startup.
 
@@ -233,7 +273,9 @@ All six connectors are disabled in the example YAML. Their `enabled` flags contr
 
 ## Connection lifecycle and tool discovery
 
-There are **43 tools** when all connectors are active. With every connector disabled, these eight remain available:
+With all six connectors active, `tools/list` reports **46 tools** by default. The `omni.jdbc.write` settings `allow-permissions: true` and `allow-raw-sql: true` register `db_execute_permission` and `db_execute_rawsql`, respectively. Enabling either setting brings the total to **47 tools**. Enabling both brings it to **48 tools**.
+
+With every connector disabled, these eight remain available:
 
 `connector_status`, `apollo_connect`, `nacos_connect`, `db_switch_datasource`, `redis_connect`, `rabbitmq_connect`, and `kafka_connect`, plus the offline `convert_config` tool.
 
