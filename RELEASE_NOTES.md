@@ -1,5 +1,11 @@
 # Release Notes
 
+## v0.4.0
+
+- Renamed `db_execute_supreme` to `db_execute_rawsql`. To enable the renamed tool, replace `omni.jdbc.write.allow-supreme` with `omni.jdbc.write.allow-raw-sql`.
+- Apollo properties item reads and writes now support Portal sign-in with a username and password as well as OpenAPI Token authentication. A configured Token takes precedence.
+- Added `apollo_create_config` and `apollo_delete_config`. Both save drafts by default and support explicit publication. `apollo_update_config` continues to publish by default.
+
 ## v0.3.0
 
 - Added the read-only `apollo_list_app_ids` tool. It returns all app IDs visible to the configured Portal credentials in Portal response order. Apply keyword and prefix filters in the caller.

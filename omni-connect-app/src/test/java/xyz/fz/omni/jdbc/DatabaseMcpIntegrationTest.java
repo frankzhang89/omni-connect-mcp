@@ -92,7 +92,7 @@ class DatabaseMcpIntegrationTest {
             JsonNode switchTool = null;
             for (JsonNode tool : tools) {
                 assertNotEquals("db_execute_permission", tool.path("name").asString());
-                assertNotEquals("db_execute_supreme", tool.path("name").asString());
+                assertNotEquals("db_execute_rawsql", tool.path("name").asString());
                 assertFalse(
                         tool.path("inputSchema").path("properties").has("expectedDatasourceId"));
                 if (tool.path("name").asString().equals("db_switch_datasource")) {
@@ -105,12 +105,12 @@ class DatabaseMcpIntegrationTest {
                     permissionCall(endpoint, session, "GRANT SELECT ON TABLE demo TO reader");
             assertTrue(disabledPermission.has("error")
                     || disabledPermission.path("result").path("isError").asBoolean());
-            var disabledSupreme =
+            var disabledRawSql =
                     rpc(endpoint, session, "tools/call",
-                            Map.of("name", "db_execute_supreme", "arguments", Map.of("sql", "SELECT 1")))
+                            Map.of("name", "db_execute_rawsql", "arguments", Map.of("sql", "SELECT 1")))
                             .body();
-            assertTrue(disabledSupreme.has("error")
-                    || disabledSupreme.path("result").path("isError").asBoolean());
+            assertTrue(disabledRawSql.has("error")
+                    || disabledRawSql.path("result").path("isError").asBoolean());
 
             var before = call(endpoint, session, "db_query", Map.of("sql", "SELECT id FROM users"));
             assertEquals(1, before.path("rows").get(0).path("id").asInt());
@@ -486,24 +486,25 @@ class DatabaseMcpIntegrationTest {
     }
 
     @Test
-    void supremeExecutesRawSqlAndDiscardsSessionChanges() throws Exception {
-        String address = "jdbc:h2:mem:mcp_supreme_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
-        Path config = configuration("supreme-test", TOKEN);
+    void executesRawSqlAndDiscardsSessionChanges() throws Exception {
+        String address = "jdbc:h2:mem:mcp_rawsql_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
+        Path config = configuration("rawsql-test", TOKEN);
         Files.writeString(
                 config,
                 Files.readString(config)
-                        .replace("jdbc:probe:supreme-test", address)
+                        .replace("jdbc:probe:rawsql-test", address)
                         .replace("connection-timeout: 300", "connection-timeout: 2000")
                         .replace(
                                 "  jdbc:\n    enabled: true",
                                 "  jdbc:\n    enabled: true\n    write:\n"
-                                        + "      allow-ddl: false\n      allow-supreme: true"));
+                                        + "      allow-ddl: false\n      allow-raw-sql: true"));
         try (var context = start(config)) {
             String endpoint = endpoint(context);
             String session = initialize(endpoint);
-            String toolName = "db_execute_supreme";
+            String toolName = "db_execute_rawsql";
             var tools = rpc(endpoint, session, "tools/list", Map.of()).body();
             assertTrue(tools.toString().contains(toolName));
+            assertFalse(tools.toString().contains("db_execute_supreme"));
             assertFalse(tools.toString().contains("db_execute_permission"));
 
             var created = call(endpoint, session, toolName,

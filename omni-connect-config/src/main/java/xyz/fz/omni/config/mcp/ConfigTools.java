@@ -68,7 +68,7 @@ public class ConfigTools {
     @McpTool(
             name = "apollo_read_item",
             description =
-                    "Read one Apollo properties key through Portal OpenAPI. Returns the CURRENT"
+                    "Read one Apollo properties key using a Portal Token or login session. Returns the CURRENT"
                         + " EDITING value, which may be unpublished, with comment, modification"
                         + " metadata and value SHA-256. Optional identifiers override server"
                         + " defaults. No writes. Use apollo_read_config for published namespace"
@@ -105,7 +105,7 @@ public class ConfigTools {
     @McpTool(
             name = "apollo_update_config",
             description =
-                    "Update an EXISTING Apollo properties key to the complete supplied value. Reads"
+                    "Update an EXISTING Apollo properties key using a Portal Token or login session. Reads"
                         + " before/after using the same API as apollo_read_item and preserves the"
                         + " comment. Publishes the namespace by default; publish=false saves only."
                         + " Stops on detected unpublished changes to other keys. Checks and"
@@ -170,38 +170,96 @@ public class ConfigTools {
                     String releaseTitle,
             @McpToolParam(description = "Release comment; empty if omitted", required = false)
                     String releaseComment) {
-        return result(
-                () -> {
-                    try {
-                        return service.apolloUpdate(
-                                key,
-                                value,
-                                appId,
-                                cluster,
-                                namespace,
-                                fileType,
-                                env,
-                                publish,
-                                operator,
-                                releasedBy,
-                                releaseTitle,
-                                releaseComment);
-                    } catch (MigrationException e) {
-                        if (!e.details().isEmpty()) throw e;
-                        throw new MigrationException(
-                                e.code(),
-                                "Apollo update validation failed; " + e.getMessage(),
-                                Map.of(
-                                        "stage",
-                                        "VALIDATE",
-                                        "updated",
-                                        false,
-                                        "published",
-                                        false,
-                                        "verified",
-                                        false));
-                    }
-                });
+        return result(() -> apolloWrite("updated", () -> service.apolloUpdate(
+                key, value, appId, cluster, namespace, fileType, env, publish, operator,
+                releasedBy, releaseTitle, releaseComment)));
+    }
+
+    @McpTool(
+            name = "apollo_create_config",
+            description =
+                    "Create a previously absent Apollo properties key."
+                        + " Uses a Portal Token or login session. Defaults to saving only."
+                        + " Set publish=true to publish after checking other unpublished config values."
+                        + " Verify draft and published state before retrying an unknown write.",
+            annotations = @McpTool.McpAnnotations(
+                    readOnlyHint = false, destructiveHint = true, idempotentHint = false))
+    public CallToolResult apolloCreate(
+            @McpToolParam(description = "Exact new properties key", required = true) String key,
+            @McpToolParam(description = "Complete string value; empty string allowed", required = true) String value,
+            @McpToolParam(description = "Item comment; empty if omitted", required = false)
+                    String comment,
+            @McpToolParam(description = "Apollo app ID; defaults to configured app ID", required = false)
+                    String appId,
+            @McpToolParam(description = "Apollo cluster; defaults to configured cluster", required = false)
+                    String cluster,
+            @McpToolParam(description = "Apollo namespace; defaults to configured namespace", required = false)
+                    String namespace,
+            @McpToolParam(description = "Only properties is supported", required = false)
+                    String fileType,
+            @McpToolParam(description = "Apollo environment; defaults to configured env", required = false)
+                    String env,
+            @McpToolParam(description = "Defaults to false; true publishes after verification", required = false)
+                    Boolean publish,
+            @McpToolParam(description = "Token mode editor; Web UI mode uses the logged-in user", required = false)
+                    String operator,
+            @McpToolParam(description = "Token mode publisher; Web UI mode uses the logged-in user", required = false)
+                    String releasedBy,
+            @McpToolParam(description = "Release title; generated if omitted", required = false)
+                    String releaseTitle,
+            @McpToolParam(description = "Release comment; empty if omitted", required = false)
+                    String releaseComment) {
+        return result(() -> apolloWrite("created", () -> service.apolloCreate(
+                key, value, comment, appId, cluster, namespace, fileType, env, publish, operator,
+                releasedBy, releaseTitle, releaseComment)));
+    }
+
+    @McpTool(
+            name = "apollo_delete_config",
+            description =
+                    "Delete an existing Apollo properties key."
+                        + " Uses a Portal Token or login session. Defaults to saving only."
+                        + " Set publish=true to publish after checking other unpublished config values."
+                        + " Verify draft and published state before retrying an unknown write.",
+            annotations = @McpTool.McpAnnotations(
+                    readOnlyHint = false, destructiveHint = true, idempotentHint = false))
+    public CallToolResult apolloDelete(
+            @McpToolParam(description = "Exact properties key to delete", required = true) String key,
+            @McpToolParam(description = "Apollo app ID; defaults to configured app ID", required = false)
+                    String appId,
+            @McpToolParam(description = "Apollo cluster; defaults to configured cluster", required = false)
+                    String cluster,
+            @McpToolParam(description = "Apollo namespace; defaults to configured namespace", required = false)
+                    String namespace,
+            @McpToolParam(description = "Only properties is supported", required = false)
+                    String fileType,
+            @McpToolParam(description = "Apollo environment; defaults to configured env", required = false)
+                    String env,
+            @McpToolParam(description = "Defaults to false; true publishes after verification", required = false)
+                    Boolean publish,
+            @McpToolParam(description = "Token mode editor; Web UI mode uses the logged-in user", required = false)
+                    String operator,
+            @McpToolParam(description = "Token mode publisher; Web UI mode uses the logged-in user", required = false)
+                    String releasedBy,
+            @McpToolParam(description = "Release title; generated if omitted", required = false)
+                    String releaseTitle,
+            @McpToolParam(description = "Release comment; empty if omitted", required = false)
+                    String releaseComment) {
+        return result(() -> apolloWrite("deleted", () -> service.apolloDelete(
+                key, appId, cluster, namespace, fileType, env, publish, operator,
+                releasedBy, releaseTitle, releaseComment)));
+    }
+
+    private static Object apolloWrite(String resultField, Supplier<?> operation) {
+        try {
+            return operation.get();
+        } catch (MigrationException e) {
+            if (!e.details().isEmpty()) throw e;
+            throw new MigrationException(
+                    e.code(), "Apollo item validation failed; " + e.getMessage(),
+                    Map.of("stage", "VALIDATE", resultField, false,
+                            "published", false, "verified", false));
+        }
     }
 
     @McpTool(

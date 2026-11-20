@@ -75,7 +75,7 @@ public class HttpTransport implements AutoCloseable {
                 method,
                 uri,
                 headers,
-                json.writeValueAsString(body),
+                body == null ? null : json.writeValueAsString(body),
                 MediaType.APPLICATION_JSON,
                 true);
     }

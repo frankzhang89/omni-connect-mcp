@@ -16,6 +16,13 @@ assumptions:
     verification: On 2026-11-19, RuntimeConnectionsTest covered CSRF form submission, cookie rotation, cookie isolation, denied sessions, and Token precedence. The packaged MCP server used form login against the live Portal and returned 49 app IDs in the same order as its GET /apps response. Live Token authentication was not exercised.
     source: https://github.com/apolloconfig/apollo/blob/v2.3.0/apollo-portal/src/main/java/com/ctrip/framework/apollo/portal/controller/AppController.java#L91-L97
     updated_at: "2026-11-19"
+  - id: apollo-item-writes-and-publication
+    status: supported
+    claim: Portal OpenAPI mutates properties items by key, while the tested legacy Web UI route updates an item DTO and deletes by internal item ID. Both save drafts separately from namespace publication.
+    reason: The official OpenAPI and Portal controllers define separate item and release operations. Read-only checks on the deployed Portal confirmed the Web UI routes, item IDs and string-encoded active-release configurations.
+    verification: On 2026-11-20, the JDK 25 Maven suite exercised both authentication paths through the local HTTP fixture. Postman simulation tests exercised Token-mode create, update, delete and release verification. A packaged MCP instance used the real Portal login to read a draft item with key, value and comment matching the Web UI response. No live write or release was attempted.
+    source: https://github.com/apolloconfig/apollo/blob/master/docs/zh/portal/apollo-open-api-platform.md; https://github.com/apolloconfig/apollo/blob/v2.3.0/apollo-portal/src/main/java/com/ctrip/framework/apollo/portal/controller/ItemController.java#L82-L145
+    updated_at: "2026-11-20"
   - id: nacos-namespace-list
     status: supported
     claim: The Nacos 2.x namespace list returns metadata and the configuration count for each namespace.

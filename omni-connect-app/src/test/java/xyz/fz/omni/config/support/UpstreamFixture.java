@@ -16,6 +16,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** Real HTTP test peers, based on documented Apollo and Nacos 1.x/2.x/3.x wire contracts. */
 public final class UpstreamFixture implements AutoCloseable {
     public static final String PORTAL_PASSWORD = "fixture &+ password";
+    private static final java.util.regex.Pattern WEB_ITEMS = java.util.regex.Pattern.compile(
+            "/apollo/apps/([^/]+)/envs/([^/]+)/clusters/([^/]+)/namespaces/([^/]+)(.*)");
+    private static final java.util.regex.Pattern TOKEN_ITEMS = java.util.regex.Pattern.compile(
+            "/apollo/openapi/v1/envs/([^/]+)/apps/([^/]+)/clusters/([^/]+)/namespaces/([^/]+)(.*)");
+    private final Map<String, Map<String, String>> itemComments = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Integer>> itemIds = new ConcurrentHashMap<>();
+    private final AtomicInteger nextItemId = new AtomicInteger();
+    public volatile boolean portalConfigHidden;
+    public volatile String lastDeleteIdentifier;
+    public volatile String lastDeleteOperator;
     public final AtomicInteger portalLoginAttempts = new AtomicInteger();
     public final AtomicInteger portalSessionAppReads = new AtomicInteger();
     public volatile boolean portalSessionExpired;
@@ -209,7 +219,8 @@ public final class UpstreamFixture implements AutoCloseable {
                     respond(exchange, 302, "", false);
                 }
             } else if (path.equals("/apollo/openapi/v1/apps")
-                    || path.startsWith("/apollo/openapi/v1/envs/")) {
+                    || path.startsWith("/apollo/openapi/v1/envs/")
+                    || path.startsWith("/apollo/apps/") || path.equals("/apollo/user")) {
                 portal(exchange, path, rawBody);
             } else if (path.startsWith("/nacos/")) {
                 nacos(exchange, path, query, form);
@@ -250,97 +261,90 @@ public final class UpstreamFixture implements AutoCloseable {
     /** Models Portal editing items and independent published release snapshots. */
     private void portal(HttpExchange exchange, String path, String rawBody)
             throws IOException, InterruptedException {
+        boolean web = !path.startsWith("/apollo/openapi/");
         portalAuthorization = exchange.getRequestHeaders().getFirst("Authorization");
         lastPortalPath = path;
         if (portalStatus != 200) {
             respond(exchange, portalStatus, "PRIVATE_UPSTREAM_ERROR", false);
             return;
         }
-        if (!"test-openapi-token".equals(portalAuthorization)) {
+        if (web) {
+            if (portalSessionExpired || portalAuthorization != null
+                    || !"SESSION=authenticated".equals(exchange.getRequestHeaders().getFirst("Cookie"))) {
+                exchange.getResponseHeaders().set("Location", "/apollo/signin");
+                respond(exchange, 302, "", false);
+                return;
+            }
+        } else if (!"test-openapi-token".equals(portalAuthorization)) {
             respond(exchange, 401, "denied", false);
             return;
         }
+        String method = exchange.getRequestMethod();
         if (path.equals("/apollo/openapi/v1/apps")) {
-            if (!exchange.getRequestMethod().equals("GET")
-                    || exchange.getRequestURI().getRawQuery() != null) {
+            if (!method.equals("GET") || exchange.getRequestURI().getRawQuery() != null) {
                 respond(exchange, 400, "Expected GET without query parameters", false);
                 return;
             }
             respond(exchange, 200, appListBody, true);
             return;
         }
-        int suffixAt = path.indexOf("/items/");
-        if (suffixAt < 0) suffixAt = path.indexOf("/releases");
-        String identity = suffixAt < 0 ? path : path.substring(0, suffixAt);
-        apolloReleases.computeIfAbsent(identity, ignored -> new ConcurrentHashMap<>(APOLLO_VALUES));
-        Map<String, String> draft =
-                apolloDrafts.computeIfAbsent(
-                        identity, ignored -> new ConcurrentHashMap<>(APOLLO_VALUES));
-        String suffix = suffixAt < 0 ? "" : path.substring(suffixAt);
-        String method = exchange.getRequestMethod();
-        if (suffix.isEmpty() && method.equals("GET")) {
-            List<Map<String, String>> items = new ArrayList<>();
-            draft.forEach((key, value) -> items.add(Map.of("key", key, "value", value)));
+        if (path.equals("/apollo/user") && method.equals("GET")) {
+            respond(exchange, 200, "{\"userId\":\"fixture-user\"}", true);
+            return;
+        }
+        var route = (web ? WEB_ITEMS : TOKEN_ITEMS).matcher(path);
+        if (!route.matches()) {
+            respond(exchange, 501, "Endpoint not modeled", false);
+            return;
+        }
+        String suffix = route.group(5);
+        String identity = portalNamespace(
+                route.group(web ? 2 : 1), route.group(web ? 1 : 2), route.group(3), route.group(4));
+        Map<String, String> draft = apolloDrafts.computeIfAbsent(
+                identity, ignored -> new ConcurrentHashMap<>(APOLLO_VALUES));
+        Map<String, String> published = apolloReleases.computeIfAbsent(
+                identity, ignored -> new ConcurrentHashMap<>(APOLLO_VALUES));
+        Map<String, String> comments = itemComments.computeIfAbsent(identity, ignored -> new ConcurrentHashMap<>());
+        Map<String, Integer> ids = itemIds.computeIfAbsent(identity, ignored -> new ConcurrentHashMap<>());
+
+        if (method.equals("GET") && suffix.isEmpty() && web) {
+            respond(exchange, 200, json.writeValueAsString(Map.of(
+                    "format", namespaceFormat, "baseInfo", Map.of("id", 42),
+                    "isConfigHidden", portalConfigHidden)), true);
+        } else if (method.equals("GET") && (suffix.isEmpty() || (web && suffix.equals("/items")))) {
+            var items = new ArrayList<Map<String, Object>>();
+            draft.forEach((key, value) -> items.add(apolloItem(key, value, comments, ids)));
             items.add(Map.of("key", "", "value", "# comment row"));
-            respond(
-                    exchange,
-                    200,
-                    json.writeValueAsString(Map.of("format", namespaceFormat, "items", items)),
-                    true);
-        } else if (suffix.startsWith("/items/")) {
+            Object result = web ? items : Map.of("format", namespaceFormat, "items", items);
+            respond(exchange, 200, json.writeValueAsString(result), true);
+        } else if (method.equals("GET") && suffix.startsWith("/items/") && !web) {
             String key = suffix.substring("/items/".length());
             if (!draft.containsKey(key)) {
                 respond(exchange, 404, "not found", false);
                 return;
             }
-            if (method.equals("GET")) {
-                itemReads.incrementAndGet();
-                respond(
-                        exchange,
-                        200,
-                        json.writeValueAsString(
-                                Map.of(
-                                        "key",
-                                        key,
-                                        "value",
-                                        draft.get(key),
-                                        "comment",
-                                        "original comment",
-                                        "dataChangeLastModifiedBy",
-                                        "editor",
-                                        "dataChangeLastModifiedTime",
-                                        "2026-10-26T10:00:00.000+0800")),
-                        true);
-            } else if (method.equals("PUT")) {
-                itemWrites.incrementAndGet();
-                var body = json.readTree(rawBody);
-                lastItemWrite =
-                        new JsonNodeHolder(
-                                body.path("key").asString(),
-                                body.path("value").asString(),
-                                body.path("comment").asString(),
-                                body.path("dataChangeLastModifiedBy").asString());
-                if (itemWriteStatus == 200) {
-                    draft.put(key, lastItemWrite.value());
-                    afterItemWrite.run();
-                }
-                if (itemWriteDelay > 0) Thread.sleep(itemWriteDelay);
-                respond(exchange, itemWriteStatus, "", false);
-            } else respond(exchange, 501, "Endpoint not modeled", false);
-        } else if (suffix.equals("/releases/latest") && method.equals("GET")) {
-            Map<String, String> published = apolloReleases.get(identity);
-            if (published.isEmpty()) {
+            itemReads.incrementAndGet();
+            respond(exchange, 200, json.writeValueAsString(apolloItem(key, draft.get(key), comments, ids)), true);
+        } else if (method.equals("GET") && suffix.equals(web ? "/releases/active" : "/releases/latest")) {
+            if (!web && published.isEmpty()) {
                 respond(exchange, 404, "no release", false);
                 return;
             }
-            respond(
-                    exchange,
-                    200,
-                    json.writeValueAsString(Map.of("configurations", published)),
-                    true);
-        } else if (suffix.equals("/releases") && method.equals("POST")) {
-            releaseWrites.incrementAndGet();
+            if (web && !Map.of("page", "0", "size", "1").equals(decode(exchange.getRequestURI().getRawQuery()))) {
+                respond(exchange, 400, "Expected one active release", false);
+                return;
+            }
+            Object result = web
+                    ? List.of(Map.of("configurations", json.writeValueAsString(published)))
+                    : Map.of("configurations", published);
+            respond(exchange, 200, json.writeValueAsString(result), true);
+        } else if (method.equals("POST") && suffix.equals("/releases")) {
             lastReleaseWrite = json.readValue(rawBody, Map.class);
+            if (web == lastReleaseWrite.containsKey("releasedBy")) {
+                respond(exchange, 400, "Unexpected release actor", false);
+                return;
+            }
+            releaseWrites.incrementAndGet();
             if (releaseWriteStatus == 200) {
                 beforeReleaseWrite.run();
                 apolloReleases.put(identity, new ConcurrentHashMap<>(draft));
@@ -348,7 +352,84 @@ public final class UpstreamFixture implements AutoCloseable {
             }
             if (releaseWriteDelay > 0) Thread.sleep(releaseWriteDelay);
             respond(exchange, releaseWriteStatus, "{}", true);
-        } else respond(exchange, 501, "Endpoint not modeled", false);
+        } else if ((web && suffix.equals("/item")) || suffix.equals("/items") || suffix.startsWith("/items/")) {
+            mutateApolloItem(exchange, method, suffix, rawBody, web, draft, comments, ids);
+        } else {
+            respond(exchange, 501, "Endpoint not modeled", false);
+        }
+    }
+
+    private Map<String, Object> apolloItem(
+            String key, String value, Map<String, String> comments, Map<String, Integer> ids) {
+        int id = ids.computeIfAbsent(key, ignored -> nextItemId.incrementAndGet());
+        return Map.of("key", key, "value", value, "comment", comments.getOrDefault(key, "original comment"),
+                "dataChangeLastModifiedBy", "editor", "dataChangeLastModifiedTime", "2026-10-26T10:00:00.000+0800",
+                "id", id, "namespaceId", 42, "lineNum", id);
+    }
+
+    private void mutateApolloItem(
+            HttpExchange exchange, String method, String suffix, String rawBody, boolean web,
+            Map<String, String> draft, Map<String, String> comments, Map<String, Integer> ids)
+            throws IOException, InterruptedException {
+        String key;
+        if (method.equals("DELETE") && suffix.startsWith("/items/")) {
+            var identifier = suffix.substring("/items/".length());
+            key = web ? ids.entrySet().stream()
+                    .filter(entry -> entry.getValue().toString().equals(identifier))
+                    .map(Map.Entry::getKey).findFirst().orElse("")
+                    : identifier;
+            if (!draft.containsKey(key)) {
+                respond(exchange, 404, "not found", false);
+                return;
+            }
+            var query = decode(exchange.getRequestURI().getRawQuery());
+            if (web ? !query.isEmpty() : !query.containsKey("operator")) {
+                respond(exchange, 400, "Unexpected delete actor", false);
+                return;
+            }
+            lastDeleteIdentifier = identifier;
+            lastDeleteOperator = query.get("operator");
+        } else if (method.equals("POST") || method.equals("PUT")) {
+            var body = json.readTree(rawBody);
+            key = body.path("key").asString();
+            boolean create = method.equals("POST");
+            boolean correctRoute = web ? suffix.equals("/item")
+                    : create ? suffix.equals("/items") : suffix.equals("/items/" + key);
+            if (!correctRoute || !body.path("value").isString()
+                    || (web && (body.path("namespaceId").asInt() != 42
+                        || (!create && (!Objects.equals(ids.get(key), body.path("id").asInt())
+                        || !Objects.equals(ids.get(key), body.path("lineNum").asInt())))))
+                    || (!web && (create ? !body.has("dataChangeCreatedBy")
+                            : !body.has("dataChangeLastModifiedBy")
+                            || !"false".equals(decode(exchange.getRequestURI().getRawQuery()).get("createIfNotExists"))))) {
+                respond(exchange, 400, "Invalid item", false);
+                return;
+            }
+            if (create == draft.containsKey(key)) {
+                respond(exchange, create ? 409 : 404, "Unexpected draft state", false);
+                return;
+            }
+            lastItemWrite = new JsonNodeHolder(key, body.path("value").asString(),
+                    body.path("comment").asString(), web ? "fixture-user"
+                            : body.path(create ? "dataChangeCreatedBy" : "dataChangeLastModifiedBy").asString());
+        } else {
+            respond(exchange, 501, "Endpoint not modeled", false);
+            return;
+        }
+        itemWrites.incrementAndGet();
+        if (itemWriteStatus == 200) {
+            if (method.equals("DELETE")) {
+                draft.remove(key);
+                comments.remove(key);
+                ids.remove(key);
+            } else {
+                draft.put(key, lastItemWrite.value());
+                comments.put(key, lastItemWrite.comment());
+            }
+            afterItemWrite.run();
+        }
+        if (itemWriteDelay > 0) Thread.sleep(itemWriteDelay);
+        respond(exchange, itemWriteStatus, "", false);
     }
 
     /** Models version-specific wire contracts, rejecting accidental cross-generation calls. */

@@ -18,14 +18,14 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-@ConditionalOnProperty(prefix = "omni.jdbc.write", name = "allow-supreme", havingValue = "true")
-public class DatabaseSupremeTools {
+@ConditionalOnProperty(prefix = "omni.jdbc.write", name = "allow-raw-sql", havingValue = "true")
+public class DatabaseRawSqlTools {
     private static final int MAX_RETURNED_RESULTS = 20;
     private final DatabaseRuntimeManager runtime;
     private final TransactionResultMapper mapper;
     private final int timeoutSeconds;
 
-    public DatabaseSupremeTools(
+    public DatabaseRawSqlTools(
             DatabaseRuntimeManager runtime,
             @Value("${omni.jdbc.query.max-rows:100}") int maxRows,
             @Value("${omni.jdbc.query.max-cell-chars:4000}") int maxCellChars,
@@ -36,7 +36,7 @@ public class DatabaseSupremeTools {
     }
 
     @McpTool(
-            name = "db_execute_supreme",
+            name = "db_execute_rawsql",
             description =
                     "Send raw SQL unchanged to the active JDBC data source. The driver and database"
                         + " decide syntax, batch handling, and privileges. Returns ordered query"

@@ -6,6 +6,7 @@ public final class MigrationException extends RuntimeException {
         INVALID_FORMAT,
         CONVERSION_CONFLICT,
         NOT_FOUND,
+        ALREADY_EXISTS,
         AUTHENTICATION_FAILED,
         UPSTREAM_ERROR,
         NETWORK_ERROR,

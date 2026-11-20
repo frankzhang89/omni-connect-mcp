@@ -68,6 +68,10 @@ public record MigrationProperties(
             if (namespace == null) namespace = "application";
             if (fileType == null) fileType = "properties";
         }
+
+        public boolean hasOpenApiToken() {
+            return openapiToken != null && !openapiToken.isBlank();
+        }
     }
 
     public record Nacos(

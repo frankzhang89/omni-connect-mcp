@@ -20,7 +20,7 @@ public final class ConfigModels {
         READ,
         WRITE,
         READ_ITEM,
-        UPDATE_ITEM,
+        WRITE_ITEM,
         DISCOVER
     }
 
@@ -72,14 +72,42 @@ public final class ConfigModels {
             String sha256,
             String valueSource) {}
 
-    public record ItemUpdateRequest(
+    public enum ItemAction {
+        CREATE("created"),
+        UPDATE("updated"),
+        DELETE("deleted");
+
+        private final String resultField;
+
+        ItemAction(String resultField) {
+            this.resultField = resultField;
+        }
+
+        public String resultField() {
+            return resultField;
+        }
+    }
+
+    public record ItemChangeRequest(
+            ItemAction action,
             ItemReadRequest item,
             String value,
+            String comment,
             boolean publish,
             String operator,
             String releasedBy,
             String releaseTitle,
             String releaseComment) {}
+
+    public record ItemChangeResult(boolean changed, boolean published) {}
+
+    public record ItemCreateResult(
+            Location location, String env, String fileType, String key, String sha256,
+            boolean created, boolean published, boolean verified) {}
+
+    public record ItemDeleteResult(
+            Location location, String env, String fileType, String key,
+            boolean deleted, boolean published, boolean verified) {}
 
     public record ItemUpdateResult(
             Location location,

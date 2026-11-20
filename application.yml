@@ -6,7 +6,7 @@ spring:
     mcp:
       server:
         name: omni-connect-mcp
-        version: 0.3.0
+        version: 0.4.0
         stdio: false
         protocol: STREAMABLE
         type: SYNC
@@ -82,7 +82,7 @@ omni:
     write:
       allow-ddl: true
       allow-permissions: false
-      allow-supreme: false
+      allow-raw-sql: false
     transaction:
       idle-timeout-seconds: 120
       max-lifetime-seconds: 600

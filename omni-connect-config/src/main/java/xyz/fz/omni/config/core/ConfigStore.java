@@ -25,8 +25,8 @@ public interface ConfigStore {
         ItemReadResult readItem(ItemReadRequest request);
     }
 
-    interface ItemUpdatable extends ConfigStore {
-        ItemUpdateResult updateItem(ItemUpdateRequest request);
+    interface ItemWritable extends ConfigStore {
+        ItemChangeResult changeItem(ItemChangeRequest request);
     }
 
     interface AppDiscoverable extends ConfigStore {

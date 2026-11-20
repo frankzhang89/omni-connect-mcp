@@ -2,13 +2,16 @@
 
 One MCP server for Apollo, Nacos, relational databases, standalone Redis, RabbitMQ, and Kafka. It runs from one executable JAR with one external `application.yml` and supports both stdio and Streamable HTTP.
 
-The current version is [v0.3.0](RELEASE_NOTES.md#v030). See the [Release Notes](RELEASE_NOTES.md) for version history. Record post-release changes under `Unreleased`.
+The current version is [v0.4.0](RELEASE_NOTES.md#v040). See the [Release Notes](RELEASE_NOTES.md) for version history. Record post-release changes under `Unreleased`.
+
+- JDBC raw SQL execution is now available as `db_execute_rawsql`. Enable it with `omni.jdbc.write.allow-raw-sql: true`.
+- Apollo configuration items can be read, created, edited, and deleted through Portal sign-in or OpenAPI Token authentication. Create and delete save drafts by default.
 
 ## Capabilities
 
 | Connector | Capabilities |
 | --- | --- |
-| Apollo | List app IDs with a Portal Token or account credentials, read published configurations, and read, update, or publish existing properties items through Portal OpenAPI. |
+| Apollo | List app IDs and manage properties items using a Portal Token or account credentials. Read published namespaces through ConfigService. |
 | Nacos | Discover namespaces and configuration IDs; read, create, and replace complete configuration documents. Detects Nacos 1.x/2.x/3.x once per connection and selects version-specific APIs. |
 | JDBC | Connect to MySQL, PostgreSQL, Oracle, SQL Server, and StarRocks; inspect metadata; query data; execute DML and DDL; manage explicit transactions and switch databases at runtime. |
 | Redis | Connect to standalone Redis; scan keys; inspect type, TTL, and size; read and write string, list, set, hash, and sorted-set values; manage expiry and logical database selection. |
@@ -110,7 +113,7 @@ spring:
     mcp:
       server:
         name: omni-connect-mcp
-        version: 0.3.0
+        version: 0.4.0
         stdio: false
         protocol: STREAMABLE
         type: SYNC
@@ -186,7 +189,7 @@ omni:
     write:
       allow-ddl: true
       allow-permissions: false
-      allow-supreme: false
+      allow-raw-sql: false
     transaction:
       idle-timeout-seconds: 120
       max-lifetime-seconds: 600
@@ -215,12 +218,12 @@ omni:
 | --- | --- |
 | `omni.auth` | HTTP authentication. `enabled: true` requires a nonempty `token`; clients send it as a Bearer token. Stdio does not require it. |
 | `omni.config.http` | Apollo/Nacos connection and read timeouts, expressed as durations such as `3s`. |
-| `omni.config.apollo` | Set `enabled: true`, `meta`, and `app-id` for startup activation. Published reads use `cluster`, `namespace`, `file-type`, and optional signing `access-key`. App listing requires `portal-url` and either `openapi-token` or both `portal-username` and `portal-password`. Item operations require `portal-url`, `openapi-token`, and `env`. Updates also require an operator. |
+| `omni.config.apollo` | Set `enabled: true`, `meta`, and `app-id` for startup activation. Published reads use `cluster`, `namespace`, `file-type`, and optional signing `access-key`. App listing and item operations require `portal-url` and either `openapi-token` or both `portal-username` and `portal-password`. Item operations also require an environment. Token-mode writes require an operator. |
 | `omni.config.nacos` | Set `enabled: true` and `server-addr` for startup activation. Use one origin such as `http://nacos.example.com:8848`; set `context-path` separately, normally `/nacos`. Supply credentials when authentication is enabled. `namespace` is an ID; empty string or `public` selects public. `group` and `file-type` provide operation defaults. |
 | `omni.jdbc` | Set `enabled: true` and connection URL/credentials for startup activation. The JDBC driver is selected from the URL. `max-active` and `min-idle` control the pool; `connection-timeout` is in milliseconds. |
 | `omni.jdbc.query` | Result row limit, query timeout in seconds, and maximum returned characters per cell. |
 | `omni.jdbc.switch` | Candidate connection and validation timeouts in seconds. |
-| `omni.jdbc.write` | `allow-ddl` defaults to `true`. Set `allow-permissions: true` for account and permission management, or `allow-supreme: true` for raw SQL execution. These switches are independent. |
+| `omni.jdbc.write` | `allow-ddl` defaults to `true`. Set `allow-permissions: true` for account and permission management, or `allow-raw-sql: true` for raw SQL execution. These switches are independent. |
 | `omni.jdbc.transaction` | Idle/lifetime/script timeouts in seconds, concurrent transaction limit, and SQL/statement limits. |
 | `omni.redis` | Set `enabled: true` with `connection.host`, `port`, optional credentials, and `database` for startup activation. Keep host and port separate. `limits` bounds database indices, scans, returned items, and value length. |
 
@@ -260,8 +263,10 @@ Parameter names in tool calls use camelCase; YAML configuration uses kebab-case.
 | `apollo_connect` | Required: `meta`, `appId`. Optional: `cluster`, `namespace`, `fileType`, `accessKey`, `portalUrl`, `openapiToken`, `portalUsername`, `portalPassword`, `env`, `operator`, `releasedBy`. | Validates a published namespace and activates/replaces Apollo. Defaults are cluster `default`, namespace `application`, and format `properties`. Portal credentials are validated on use. |
 | `apollo_list_app_ids` | None | Returns `appIds` in Portal order for all applications visible to the active Portal credentials. Filter by keyword or prefix in the caller. |
 | `apollo_read_config` | Optional: `appId`, `cluster`, `namespace`, `fileType`. | Reads published content with location, release key, and SHA-256. Omitted identifiers use active connection defaults. |
-| `apollo_read_item` | Required: `key`. Optional: `appId`, `cluster`, `namespace`, `fileType`, `env`. | Reads a properties item's current editing value, comment, and metadata through Portal OpenAPI; it may differ from the published value. |
+| `apollo_read_item` | Required: `key`. Optional: `appId`, `cluster`, `namespace`, `fileType`, `env`. | Reads a properties item's current editing value, comment, and metadata using the active Portal credentials. |
 | `apollo_update_config` | Required: `key`, `value`. Optional: `appId`, `cluster`, `namespace`, `fileType`, `env`, `publish`, `operator`, `releasedBy`, `releaseTitle`, `releaseComment`. | Updates an existing properties item to the complete supplied value and preserves its comment. Publishes by default; `publish: false` only saves the editing value. |
+| `apollo_create_config` | Required: `key`, `value`. Optional: `comment` and the same target and publication arguments as update. | Creates a new properties item. Saves to the draft by default. |
+| `apollo_delete_config` | Required: `key`. Optional: same target and publication arguments as update. | Deletes the exact properties item from the draft. Set `publish: true` to publish the deletion. |
 
 For published YAML reads, missing namespace suffixes are appended according to `fileType`; `.yaml` and `.yml` are significant. Item read/update tools support properties namespaces only. Before updating part of a value, read the full item and preserve everything that should remain. Publication can include a namespace's changes; the tool checks for other unpublished edits, but those checks and publication are not atomic.
 
@@ -300,7 +305,7 @@ Compatibility tests model representative 1.4.x, 2.0/2.1, 2.2, 2.4, 3.0 and 3.2 c
 | `db_execute_dml` | Required: `sql`. Optional: `parameters`. | Executes one INSERT, UPDATE, DELETE, MERGE, or UPSERT supported by the database; returns affected rows and supported generated keys. Executes independently of explicit transaction handles. |
 | `db_execute_ddl` | Required: `sql`. | Executes one CREATE, ALTER, DROP, TRUNCATE, or RENAME statement when DDL is enabled. |
 | `db_execute_permission` | Required: `sql`. | Executes one supported permission, account, or role statement when explicitly enabled. Returns `success` and `datasourceId`. |
-| `db_execute_supreme` | Required: `sql`. | Sends raw SQL unchanged to the active database when explicitly enabled. Returns ordered query results and update counts. |
+| `db_execute_rawsql` | Required: `sql`. | Sends raw SQL unchanged to the active database when explicitly enabled. Returns ordered query results and update counts. |
 | `db_execute` | Required: `sql`. Optional: `transactionId`. | Opens an explicit transaction with `BEGIN`, executes SQL on its retained connection, and closes it with `COMMIT` or `ROLLBACK`. |
 
 Use the connected database's SQL dialect. `db_query` and `db_execute_dml` bind values with `?` placeholders and `parameters`. Neither RETURNING nor OUTPUT is supported by the DML tool. `db_query` rejects writes, locking clauses, EXPLAIN ANALYZE, and EXPLAIN options. Oracle/SQL Server estimated plans use `db_execute` instead.
@@ -323,7 +328,7 @@ All five dialects accept native `GRANT` and `REVOKE`. Submit one statement per c
 
 #### Raw SQL
 
-Set `omni.jdbc.write.allow-supreme: true` to expose `db_execute_supreme` when JDBC is active. The tool passes the entire `sql` string to JDBC in one execution. The driver and database handle syntax, multiple statements, transaction behavior, and access control.
+Set `omni.jdbc.write.allow-raw-sql: true` to expose `db_execute_rawsql` when JDBC is active. The tool passes the entire `sql` string to JDBC in one execution. The driver and database handle syntax, multiple statements, transaction behavior, and access control.
 
 Each call starts in auto-commit and discards its connection afterwards. Session settings and open transactions cannot carry over to subsequent calls. Earlier statements in a batch may take effect even if execution later returns an error.
 
@@ -397,13 +402,13 @@ The examples below are the `params` object of an MCP `tools/call` request. Pass 
 {"name":"apollo_read_config","arguments":{}}
 ```
 
-Set `portalUrl` to the base URL of the Apollo management UI, including its deployment path when present. For app listing, supply `openapiToken` to use Portal OpenAPI, or supply `portalUsername` and `portalPassword` to use the built-in Portal sign-in form. A configured Token takes precedence. If the Portal rejects the Token, the tool reports an authentication error. To find IDs starting with `sq`, filter the returned `appIds` in the agent.
+Set `portalUrl` to the base URL of the Apollo management UI, including its deployment path when present. For app listing and item operations, supply `openapiToken` to use Portal OpenAPI, or supply `portalUsername` and `portalPassword` to use the built-in Portal sign-in form. A configured Token takes precedence. If the Portal rejects the Token, the tool reports an authentication error. To find IDs starting with `sq`, filter the returned `appIds` in the agent.
 
 ```json
 {"name":"apollo_list_app_ids","arguments":{}}
 ```
 
-For item operations, set `openapiToken` and `env`. Set `operator` for updates, plus `releasedBy` when a separate publisher is required. Read the existing item before changing it.
+For item operations, set `env` or pass it in the tool call. Token-mode writes use `operator` and default `releasedBy` to the editor if a separate publisher is omitted. Form login uses the authenticated Portal account for editing and publishing. Any supplied or configured actor must match that account.
 
 ```json
 {"name":"apollo_read_item","arguments":{"key":"service.url"}}
@@ -412,6 +417,16 @@ For item operations, set `openapiToken` and `env`. Set `operator` for updates, p
 ```json
 {"name":"apollo_update_config","arguments":{"key":"service.url","value":"https://api.example.com/v2","publish":false}}
 ```
+
+```json
+{"name":"apollo_create_config","arguments":{"key":"service.timeout","value":"5000","comment":"Milliseconds"}}
+```
+
+```json
+{"name":"apollo_delete_config","arguments":{"key":"service.timeout","publish":true}}
+```
+
+Create and delete default to saving drafts. To publish an earlier addition, call create with the same key, value, and comment and set `publish: true` while the key is still absent from the active release. To publish an earlier draft deletion, call delete with `publish: true` while the key is still in the active release. Publication stops if other configuration values have unpublished changes. On `WRITE_RESULT_UNKNOWN`, read the editing item and active release before retrying.
 
 ### Nacos: discover, read, then publish
 

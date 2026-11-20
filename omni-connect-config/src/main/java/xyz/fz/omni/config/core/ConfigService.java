@@ -1,6 +1,7 @@
 package xyz.fz.omni.config.core;
 
 import static xyz.fz.omni.config.core.ConfigModels.required;
+import static xyz.fz.omni.config.core.ConfigModels.sha256;
 import static xyz.fz.omni.config.core.MigrationException.Code.*;
 
 import xyz.fz.omni.config.config.MigrationProperties;
@@ -9,6 +10,7 @@ import xyz.fz.omni.config.format.ConfigFormatService;
 
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public class ConfigService {
@@ -98,19 +100,66 @@ public class ConfigService {
             String releaseTitle,
             String releaseComment) {
         ItemReadRequest item = apolloItemRequest(key, appId, cluster, namespace, fileType, env);
-        if (value == null || value.length() > 20000)
+        var result = apolloChange(
+                ItemAction.UPDATE, item, value, null, publish == null || publish, operator,
+                releasedBy, releaseTitle, releaseComment);
+        return new ItemUpdateResult(
+                item.location(), item.env(), "properties", key, sha256(value), result.changed(),
+                result.published(), true);
+    }
+
+    public ItemCreateResult apolloCreate(
+            String key, String value, String comment, String appId, String cluster,
+            String namespace, String fileType, String env, Boolean publish, String operator,
+            String releasedBy, String releaseTitle, String releaseComment) {
+        ItemReadRequest item = apolloItemRequest(key, appId, cluster, namespace, fileType, env);
+        String itemComment = or(comment, "");
+        if (itemComment.length() > 256) {
+            throw new MigrationException(INVALID_ARGUMENT, "comment must not exceed 256 characters");
+        }
+        var result = apolloChange(
+                ItemAction.CREATE, item, value, itemComment, Boolean.TRUE.equals(publish), operator,
+                releasedBy, releaseTitle, releaseComment);
+        return new ItemCreateResult(
+                item.location(), item.env(), "properties", key, sha256(value), result.changed(),
+                result.published(), true);
+    }
+
+    public ItemDeleteResult apolloDelete(
+            String key, String appId, String cluster, String namespace, String fileType, String env,
+            Boolean publish, String operator, String releasedBy, String releaseTitle,
+            String releaseComment) {
+        ItemReadRequest item = apolloItemRequest(key, appId, cluster, namespace, fileType, env);
+        var result = apolloChange(
+                ItemAction.DELETE, item, null, null, Boolean.TRUE.equals(publish), operator,
+                releasedBy, releaseTitle, releaseComment);
+        return new ItemDeleteResult(
+                item.location(), item.env(), "properties", key, result.changed(),
+                result.published(), true);
+    }
+
+    private ItemChangeResult apolloChange(
+            ItemAction action, ItemReadRequest item, String value, String itemComment,
+            boolean release, String operator, String releasedBy, String releaseTitle,
+            String releaseComment) {
+        if (action != ItemAction.DELETE && (value == null || value.length() > 20000))
             throw new MigrationException(
                     INVALID_ARGUMENT, "value is required and must not exceed 20000 characters");
         var defaults = settings.from().apollo();
-        String editor = required(or(operator, defaults.operator()), "operator");
-        boolean release = publish == null || publish;
+        String editor = actor(operator, defaults.operator());
         String configuredPublisher =
                 defaults.releasedBy() == null || defaults.releasedBy().isBlank()
                         ? editor
                         : defaults.releasedBy();
-        String publisher =
-                release ? required(or(releasedBy, configuredPublisher), "releasedBy") : null;
-        String title = or(releaseTitle, "update-config-" + java.time.Instant.now().toEpochMilli());
+        String publisher = release || !defaults.hasOpenApiToken()
+                ? actor(releasedBy, configuredPublisher)
+                : null;
+        if (defaults.hasOpenApiToken()) {
+            required(editor, "operator");
+            if (release) required(publisher, "releasedBy");
+        }
+        String title = or(releaseTitle, action.name().toLowerCase(Locale.ROOT) + "-config-"
+                + java.time.Instant.now().toEpochMilli());
         String comment = or(releaseComment, "");
         if (release && (title.isBlank() || title.length() > 64 || comment.length() > 256)) {
             throw new MigrationException(
@@ -119,13 +168,18 @@ public class ConfigService {
                         + " most 256");
         }
         ConfigStore store = stores.get(Provider.APOLLO);
-        if (store instanceof ConfigStore.ItemUpdatable updater
-                && store.capabilities().contains(Capability.UPDATE_ITEM)) {
-            return updater.updateItem(
-                    new ItemUpdateRequest(item, value, release, editor, publisher, title, comment));
+        if (store instanceof ConfigStore.ItemWritable writer
+                && store.capabilities().contains(Capability.WRITE_ITEM)) {
+            return writer.changeItem(new ItemChangeRequest(
+                    action, item, value, itemComment, release, editor, publisher, title, comment));
         }
         throw new MigrationException(
-                UNSUPPORTED_CAPABILITY, "Apollo item update is not implemented");
+                UNSUPPORTED_CAPABILITY, "Apollo item writes are not implemented");
+    }
+
+    private static String actor(String explicit, String configured) {
+        if (explicit != null) return required(explicit, "Portal actor");
+        return configured == null || configured.isBlank() ? null : configured;
     }
 
     private ItemReadRequest apolloItemRequest(
@@ -144,7 +198,6 @@ public class ConfigService {
                     INVALID_FORMAT, "Apollo item operations support properties only");
         var defaults = settings.from().apollo();
         required(defaults.portalUrl(), "omni.config.apollo.portal-url");
-        required(defaults.openapiToken(), "omni.config.apollo.openapi-token");
         return new ItemReadRequest(
                 resolved.location(), required(or(env, defaults.env()), "env"), key);
     }

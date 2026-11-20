@@ -272,11 +272,99 @@ class RuntimeConnectionsTest {
     }
 
     private static void assertApolloListError(McpSyncClient client, String code) {
-        var response = client.callTool(new CallToolRequest("apollo_list_app_ids", Map.of()));
+        assertApolloError(client, "apollo_list_app_ids", Map.of(), code);
+    }
+
+    private static tools.jackson.databind.JsonNode assertApolloError(
+            McpSyncClient client, String tool, Map<String, Object> args, String code) {
+        var response = client.callTool(new CallToolRequest(tool, args));
         assertTrue(response.isError());
-        assertEquals(code, JSON.valueToTree(response.structuredContent()).path("code").asString());
+        var error = JSON.valueToTree(response.structuredContent());
+        assertEquals(code, error.path("code").asString());
         assertFalse(response.toString().contains(UpstreamFixture.PORTAL_PASSWORD));
         assertFalse(response.toString().contains("SESSION="));
+        return error;
+    }
+
+    @Test
+    void editsApolloItemsUsingOnePortalSessionAndVerifiesPublication() throws Exception {
+        try (var peers = new UpstreamFixture();
+                var context = start();
+                var client = client(context)) {
+            var settings = new HashMap<String, Object>(Map.of(
+                    "meta", peers.apollo(), "appId", "source-app", "portalUrl", peers.apollo(),
+                    "portalUsername", "fixture-user", "portalPassword", UpstreamFixture.PORTAL_PASSWORD,
+                    "env", "DEV", "namespace", "web-config"));
+            call(client, "apollo_connect", settings);
+            assertTrue(names(client).containsAll(
+                    Set.of("apollo_create_config", "apollo_delete_config", "apollo_read_item")));
+            var target = Map.<String, Object>of("key", "session.new");
+            var create = Map.<String, Object>of(
+                    "key", "session.new", "value", "new value", "comment", "first remark");
+            var created = call(client, "apollo_create_config", create);
+            assertTrue(created.path("created").asBoolean());
+            assertFalse(created.path("published").asBoolean());
+            assertEquals(1, peers.portalLoginAttempts.get());
+            assertEquals(0, peers.releaseWrites.get());
+            assertEquals("first remark", call(client, "apollo_read_item", target).path("comment").asString());
+
+            var update = Map.<String, Object>of("key", "session.new", "value", "changed value");
+            var updated = call(client, "apollo_update_config", update);
+            assertTrue(updated.path("updated").asBoolean());
+            assertTrue(updated.path("published").asBoolean());
+            assertTrue(updated.path("verified").asBoolean());
+            assertEquals("first remark", peers.lastItemWrite.comment());
+            assertFalse(peers.lastReleaseWrite.containsKey("releasedBy"));
+
+            var deleted = call(client, "apollo_delete_config", target);
+            assertTrue(deleted.path("deleted").asBoolean());
+            assertFalse(deleted.path("published").asBoolean());
+            assertTrue(peers.lastDeleteIdentifier.matches("[1-9][0-9]*"));
+            assertNull(peers.lastDeleteOperator);
+            assertApolloError(client, "apollo_read_item", target, "NOT_FOUND");
+            assertTrue(call(client, "apollo_read_config", Map.of()).path("content").asString()
+                    .contains("session.new=changed value"));
+            var publishDelete = call(client, "apollo_delete_config", Map.of("key", "session.new", "publish", true));
+            assertFalse(publishDelete.path("deleted").asBoolean());
+            assertTrue(publishDelete.path("published").asBoolean());
+            assertFalse(call(client, "apollo_read_config", Map.of()).path("content").asString()
+                    .contains("session.new="));
+
+            int before = peers.itemWrites.get();
+            assertApolloError(client, "apollo_delete_config",
+                    Map.of("key", "service.url", "operator", "another-user"), "INVALID_ARGUMENT");
+            assertApolloError(client, "apollo_create_config",
+                    Map.of("key", "x", "value", "y", "publish", true, "releasedBy", "another-user"),
+                    "INVALID_ARGUMENT");
+            peers.portalConfigHidden = true;
+            assertApolloError(client, "apollo_create_config", create, "AUTHENTICATION_FAILED");
+            peers.portalConfigHidden = false;
+            assertEquals(before, peers.itemWrites.get());
+
+            var draft = peers.draft("DEV", "source-app", "default", "web-config");
+            peers.afterItemWrite = () -> draft.put("other.key", "raced");
+            var blocked = assertApolloError(client, "apollo_delete_config",
+                    Map.of("key", "service.url", "publish", true), "CONCURRENT_MODIFICATION");
+            assertEquals("PREPUBLISH", blocked.path("stage").asString());
+            assertTrue(blocked.path("deleted").asBoolean());
+            assertFalse(blocked.path("published").asBoolean());
+            draft.put("other.key", "unchanged");
+            peers.afterItemWrite = () -> {};
+            peers.releaseWriteStatus = 403;
+            var denied = assertApolloError(client, "apollo_delete_config",
+                    Map.of("key", "service.url", "publish", true), "AUTHENTICATION_FAILED");
+            assertEquals("PUBLISH", denied.path("stage").asString());
+            assertFalse(denied.path("deleted").asBoolean());
+            assertFalse(denied.path("published").asBoolean());
+
+            settings.put("openapiToken", "invalid-token");
+            call(client, "apollo_connect", settings);
+            int logins = peers.portalLoginAttempts.get();
+            assertApolloError(client, "apollo_read_item", Map.of("key", "other.key"), "AUTHENTICATION_FAILED");
+            assertApolloError(client, "apollo_delete_config",
+                    Map.of("key", "other.key", "operator", "fixture-user"), "AUTHENTICATION_FAILED");
+            assertEquals(logins, peers.portalLoginAttempts.get());
+        }
     }
 
     @Test
@@ -337,7 +425,7 @@ class RuntimeConnectionsTest {
                     first,
                     "db_switch_datasource",
                     Map.of("jdbcUrl", url, "username", "sa", "password", ""));
-            assertEquals(22, names(second).size());
+            assertEquals(24, names(second).size());
             call(first, "db_execute_ddl", Map.of("sql", "CREATE TABLE omni_sample(id INT)"));
             var begin = call(first, "db_execute", Map.of("sql", "BEGIN"));
             String tx = begin.path("transactionId").asString();
@@ -363,7 +451,7 @@ class RuntimeConnectionsTest {
                 rs.next();
                 assertEquals(1, rs.getInt(1));
             }
-            assertEquals(22, names(first).size());
+            assertEquals(24, names(first).size());
             assertTrue(
                     call(first, "connector_status", Map.of())
                             .path("jdbc")
@@ -415,7 +503,7 @@ class RuntimeConnectionsTest {
                             "password",
                             ""));
             call(client, "redis_connect", Map.of("host", "127.0.0.1", "port", redis.port()));
-            assertEquals(29, names(client).size());
+            assertEquals(31, names(client).size());
             call(
                     client,
                     "redis_write_key",
@@ -439,7 +527,7 @@ class RuntimeConnectionsTest {
                     client,
                     "redis_connect",
                     Map.of("host", "127.0.0.1", "port", redis.port(), "database", 1));
-            assertEquals(29, names(client).size());
+            assertEquals(31, names(client).size());
             assertFalse(
                     call(client, "redis_inspect_key", Map.of("key", "greeting"))
                             .path("exists")

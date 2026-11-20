@@ -28,14 +28,14 @@ public final class JdbcConnectorModule implements ConnectorModule {
             DatabaseWriteTools writes,
             DatabaseTransactionTools transactions,
             ObjectProvider<DatabasePermissionTools> permissions,
-            ObjectProvider<DatabaseSupremeTools> supreme,
+            ObjectProvider<DatabaseRawSqlTools> rawSql,
             @Value("${omni.jdbc.enabled:false}") boolean enabled) {
         this.registry = registry;
         this.runtime = runtime;
         this.enabled = enabled;
         var handlers = new ArrayList<Object>(List.of(reads, writes, transactions));
         permissions.ifAvailable(handlers::add);
-        supreme.ifAvailable(handlers::add);
+        rawSql.ifAvailable(handlers::add);
         tools = ConnectorRegistry.specifications(handlers.toArray());
     }
 

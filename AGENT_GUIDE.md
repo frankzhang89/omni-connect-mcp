@@ -11,11 +11,13 @@ The tools never save runtime configuration to disk. Reconfiguration validates a 
 
 ## Apollo and Nacos
 
-`apollo_list_app_ids` takes no arguments and returns app IDs visible to the active Apollo Portal credentials. Set `portalUrl` and either `openapiToken` or both `portalUsername` and `portalPassword` when connecting. A configured Token takes precedence, and a rejected Token produces an authentication error. Form login is available for app listing. Filter the returned `appIds` in the agent when a user asks for a keyword or prefix, such as IDs starting with `sq`.
+`apollo_list_app_ids` takes no arguments and returns app IDs visible to the active Apollo Portal credentials. For app listing and item operations, set `portalUrl` and either `openapiToken` or both `portalUsername` and `portalPassword`. A configured Token takes precedence, and a rejected Token produces an authentication error. Filter the returned `appIds` in the agent when a user asks for a keyword or prefix, such as IDs starting with `sq`.
 
-`apollo_read_config` reads the published namespace, while `apollo_read_item` reads the current editing value through Portal OpenAPI. YAML namespace suffixes are appended when omitted. Item tools support properties only. Portal URL, OpenAPI consumer token, environment, and operator are separate from the published-read access key.
+`apollo_read_config` reads the published namespace, while `apollo_read_item` reads the draft. YAML namespace suffixes are appended when omitted. Item tools support properties and require an environment. Supply the operator for Token-mode writes. Form login uses the authenticated Portal account for editing and publishing.
 
 `apollo_update_config` updates an existing key to the complete supplied replacement string. For a partial edit such as changing a port, read the item first and preserve the other parts yourself. Updates publish by default; `publish=false` only saves edits. The tool preserves the existing comment, checks other unpublished edits, and verifies the result. Concurrency checks and publication are not atomic.
+
+`apollo_create_config` adds a draft key with an optional comment. `apollo_delete_config` removes an exact key from the draft. Both default to saving without publishing. Set `publish: true` to publish the namespace after validation. To publish a pending addition with this tool, repeat create with the same key, value, and comment. To publish a pending deletion, call delete again while the key still exists in the active release.
 
 `nacos_list_namespaces` lists namespace IDs, names, and counts. `nacos_list_and_count_data_ids` lists all data IDs and counts for exactly one namespace and group. Use namespace IDs, not display names; empty string or `public` selects public.
 
@@ -32,7 +34,7 @@ Supported production targets are MySQL, Oracle, SQL Server, PostgreSQL, and Star
 - `db_execute_dml` accepts one parameterized DML statement. RETURNING and OUTPUT are rejected; generated keys are returned only where the existing driver contract supports them.
 - `db_execute_ddl` accepts one supported DDL statement when `omni.jdbc.write.allow-ddl` is true. DROP and TRUNCATE may be irreversible.
 - `db_execute_permission` accepts one native privilege, account, or role statement when `omni.jdbc.write.allow-permissions` is true. It applies to the active data source outside explicit transactions. Verify the target database and principal before changing permissions or deleting accounts. MySQL `ON db2.table_name` selects `db2` regardless of the connection default. Password statements carry the SQL literal in the request. MySQL and StarRocks support host-qualified account identities.
-- `db_execute_supreme` sends raw SQL in one JDBC execution when `omni.jdbc.write.allow-supreme` is true. The database and driver determine what can run, including whether a batch is accepted. Each call begins in auto-commit and discards the connection afterwards. Query rows are arrays ordered by the returned `columns`.
+- `db_execute_rawsql` sends raw SQL in one JDBC execution when `omni.jdbc.write.allow-raw-sql` is true. The database and driver determine what can run, including whether a batch is accepted. Each call begins in auto-commit and discards the connection afterwards. Query rows are arrays ordered by the returned `columns`.
 - `db_switch_datasource` validates and replaces the global JDBC target; it can also activate initially disabled JDBC. Failed candidates never replace the current pool. Existing work and explicit transactions stay pinned to the original target. Restart restores YAML.
 
 ### Explicit transactions

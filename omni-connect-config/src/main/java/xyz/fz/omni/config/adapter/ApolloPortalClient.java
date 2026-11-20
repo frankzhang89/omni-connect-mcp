@@ -1,23 +1,21 @@
 package xyz.fz.omni.config.adapter;
 
 import static xyz.fz.omni.config.core.ConfigModels.*;
+import static xyz.fz.omni.config.core.ConfigModels.ItemAction.*;
 import static xyz.fz.omni.config.core.MigrationException.Code.*;
 
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.web.util.UriUtils;
 
 import tools.jackson.databind.JsonNode;
 
 import xyz.fz.omni.config.config.MigrationProperties;
-import xyz.fz.omni.config.core.*;
+import xyz.fz.omni.config.core.MigrationException;
 import xyz.fz.omni.config.core.ConfigModels.*;
 
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/** Calls Apollo Portal using the active connection's Portal settings. */
+/** Uses the active connection's Portal credentials for discovery and editing. */
 final class ApolloPortalClient {
     private final HttpTransport http;
     private final MigrationProperties.Apollo settings;
@@ -29,17 +27,9 @@ final class ApolloPortalClient {
 
     AppIdListResult listAppIds() {
         String portal = portalBaseUrl();
-        String token = settings.openapiToken();
-        HttpTransport.Response response;
-        if (token != null && !token.isBlank()) {
-            response = http.get(URI.create(portal + "/openapi/v1/apps"), headers());
-        } else {
-            String username =
-                    required(settings.portalUsername(), "omni.config.apollo.portal-username");
-            String password =
-                    required(settings.portalPassword(), "omni.config.apollo.portal-password");
-            response = new ApolloPortalSession(http, portal).listApps(username, password);
-        }
+        var response = settings.hasOpenApiToken()
+                ? http.get(URI.create(portal + "/openapi/v1/apps"), tokenHeaders())
+                : login(portal).get(URI.create(portal + "/apps"));
         http.requireSuccess(response);
         JsonNode apps = http.json(response.body());
         if (!apps.isArray()) {
@@ -47,7 +37,7 @@ final class ApolloPortalClient {
         }
         List<String> appIds = new ArrayList<>();
         for (JsonNode app : apps) {
-            String appId = string(app, "appId");
+            String appId = ApolloItemEndpoint.string(app, "appId");
             if (appId.isBlank()) {
                 throw new MigrationException(UPSTREAM_ERROR, "Apollo response contains a blank appId");
             }
@@ -56,106 +46,99 @@ final class ApolloPortalClient {
         return new AppIdListResult(List.copyOf(appIds));
     }
 
-    /** Shared by the standalone read tool and both update verification reads. */
     ItemReadResult readItem(ItemReadRequest request) {
-        namespace(request); // Verify the actual format, not just the caller's declared file type.
-        JsonNode item = get(request, "/items/" + segment(request.key()));
-        if (!request.key().equals(string(item, "key"))) {
-            throw new MigrationException(UPSTREAM_ERROR, "Apollo returned a different item key");
-        }
-        String value = string(item, "value");
+        var endpoint = itemEndpoint(request);
+        JsonNode item = endpoint.requireItem(endpoint.draft());
+        String value = ApolloItemEndpoint.string(item, "value");
         return new ItemReadResult(
-                request.location(),
-                request.env(),
-                "properties",
-                request.key(),
-                value,
-                optional(item, "comment"),
-                optional(item, "dataChangeLastModifiedBy"),
-                optional(item, "dataChangeLastModifiedTime"),
-                sha256(value),
-                "EDITING");
+                request.location(), request.env(), "properties", request.key(), value,
+                ApolloItemEndpoint.optional(item, "comment"),
+                ApolloItemEndpoint.optional(item, "dataChangeLastModifiedBy"),
+                ApolloItemEndpoint.optional(item, "dataChangeLastModifiedTime"),
+                sha256(value), "EDITING");
     }
 
-    ItemUpdateResult updateItem(ItemUpdateRequest request) {
-        ItemReadRequest item = request.item();
+    ItemChangeResult changeItem(ItemChangeRequest request) {
+        var item = request.item();
+        ItemAction action = request.action();
         String stage = "READ_ITEM";
-        Boolean updated = false;
+        Boolean changed = false;
         Boolean published = false;
         try {
-            ItemReadResult before = readItem(item);
+            var endpoint = itemEndpoint(item);
+            endpoint.checkActor(request);
+            var draft = endpoint.draft();
+            JsonNode before = switch (action) {
+                case UPDATE -> endpoint.requireItem(draft);
+                case CREATE -> endpoint.findItemWithComment(draft);
+                case DELETE -> draft.items().get(item.key());
+            };
+            Map<String, String> active = Map.of();
             if (request.publish()) {
                 stage = "PRECHECK";
-                checkPending(namespace(item), latest(item), item.key());
+                active = endpoint.latest();
             }
-            if (!before.value().equals(request.value())) {
-                stage = "UPDATE";
-                Map<String, Object> body = new LinkedHashMap<>();
-                body.put("key", item.key());
-                body.put("value", request.value());
-                body.put("comment", before.comment() == null ? "" : before.comment());
-                body.put("dataChangeLastModifiedBy", request.operator());
-                // Do not infer success from an interrupted HTTP exchange.
-                updated = null;
-                write(
-                        item,
-                        "/items/" + segment(item.key()) + "?createIfNotExists=false",
-                        HttpMethod.PUT,
-                        body);
-                updated = true;
+            boolean write = requiresWrite(request, before, active);
+            if (request.publish()) {
+                checkPending(draft.values(), active, item.key());
+            }
+
+            if (write) {
+                stage = action.name();
+                changed = null;
+                endpoint.change(request, draft, before);
+                changed = true;
             }
             stage = "VERIFY_ITEM";
-            if (!readItem(item).value().equals(request.value())) {
+            var verified = endpoint.draft();
+            JsonNode after = switch (action) {
+                case UPDATE -> endpoint.requireItem(verified);
+                case CREATE -> endpoint.findItemWithComment(verified);
+                case DELETE -> verified.items().get(item.key());
+            };
+            if (!matches(request, after, before)) {
                 throw new MigrationException(
-                        VERIFICATION_FAILED,
-                        "Apollo editing value did not match the requested value");
+                        VERIFICATION_FAILED, "Apollo editing item did not match the expected state");
             }
-            if (!request.publish()) return result(item, request.value(), updated, false);
+            if (!request.publish()) return new ItemChangeResult(changed, false);
 
             stage = "PREPUBLISH";
-            Map<String, String> draft = namespace(item);
-            Map<String, String> active = latest(item);
-            checkPending(draft, active, item.key());
-            if (!request.value().equals(draft.get(item.key()))) {
+            draft = endpoint.draft();
+            active = endpoint.latest();
+            var expectedConfig = draft.values();
+            checkPending(expectedConfig, active, item.key());
+            JsonNode target = action == CREATE
+                    ? endpoint.findItemWithComment(draft)
+                    : draft.items().get(item.key());
+            if (!matches(request, target, before)) {
                 throw new MigrationException(
                         CONCURRENT_MODIFICATION, "Apollo target item changed before publication");
             }
-            if (draft.equals(active)) return result(item, request.value(), updated, true);
+            if (expectedConfig.equals(active)) return new ItemChangeResult(changed, true);
+            if (action == CREATE && !changed && active.containsKey(item.key())) {
+                throw new MigrationException(
+                        CONCURRENT_MODIFICATION, "Apollo target key was published by another operation");
+            }
 
             stage = "PUBLISH";
             published = null;
-            write(
-                    item,
-                    "/releases",
-                    HttpMethod.POST,
-                    Map.of(
-                            "releaseTitle",
-                            request.releaseTitle(),
-                            "releaseComment",
-                            request.releaseComment(),
-                            "releasedBy",
-                            request.releasedBy()));
+            endpoint.publish(request);
             published = true;
             stage = "VERIFY_RELEASE";
-            if (!draft.equals(latest(item))) {
+            if (!expectedConfig.equals(endpoint.latest())) {
                 throw new MigrationException(
                         VERIFICATION_FAILED,
                         "Apollo published configuration did not match the expected snapshot");
             }
-            return result(item, request.value(), updated, true);
+            return new ItemChangeResult(changed, true);
         } catch (RuntimeException failure) {
-            MigrationException e =
-                    failure instanceof MigrationException known
-                            ? known
-                            : new MigrationException(
-                                    updated == null || published == null
-                                            ? WRITE_RESULT_UNKNOWN
-                                            : UPSTREAM_ERROR,
-                                    "Unexpected Apollo item operation failure");
-            // A rejected 4xx mutation has not been acknowledged; transport/5xx failures remain
-            // unknown.
+            MigrationException e = failure instanceof MigrationException known
+                    ? known
+                    : new MigrationException(
+                            changed == null || published == null ? WRITE_RESULT_UNKNOWN : UPSTREAM_ERROR,
+                            "Unexpected Apollo item operation failure");
             if (e.code() != WRITE_RESULT_UNKNOWN) {
-                if (updated == null) updated = false;
+                if (changed == null) changed = false;
                 if (published == null) published = false;
             }
             Map<String, Object> details = new LinkedHashMap<>();
@@ -163,7 +146,7 @@ final class ApolloPortalClient {
             details.put("location", item.location());
             details.put("env", item.env());
             details.put("key", item.key());
-            details.put("updated", updated);
+            details.put(action.resultField(), changed);
             details.put("published", published);
             details.put("verified", false);
             throw new MigrationException(
@@ -173,60 +156,39 @@ final class ApolloPortalClient {
         }
     }
 
-    private ItemUpdateResult result(
-            ItemReadRequest item, String value, boolean updated, boolean published) {
-        return new ItemUpdateResult(
-                item.location(),
-                item.env(),
-                "properties",
-                item.key(),
-                sha256(value),
-                updated,
-                published,
-                true);
-    }
-
-    /** Includes additions and deletions; ignores blank comment rows in a properties namespace. */
-    private Map<String, String> namespace(ItemReadRequest request) {
-        JsonNode body = get(request, "");
-        if (!"properties".equals(string(body, "format"))) {
-            throw new MigrationException(
-                    INVALID_FORMAT, "Apollo item operations support properties namespaces only");
-        }
-        JsonNode items = body.get("items");
-        if (items == null || !items.isArray())
-            throw new MigrationException(UPSTREAM_ERROR, "Apollo namespace lacks items");
-        Map<String, String> result = new LinkedHashMap<>();
-        for (JsonNode entry : items) {
-            String key = string(entry, "key");
-            if (key.isEmpty()) continue;
-            if (result.putIfAbsent(key, string(entry, "value")) != null) {
-                throw new MigrationException(
-                        UPSTREAM_ERROR, "Apollo namespace contains duplicate keys");
+    private static boolean requiresWrite(
+            ItemChangeRequest request, JsonNode before, Map<String, String> active) {
+        boolean publishedKey = active.containsKey(request.item().key());
+        return switch (request.action()) {
+            case CREATE -> {
+                if (before == null) yield true;
+                if (request.publish() && !publishedKey && matches(request, before, null)) yield false;
+                throw new MigrationException(ALREADY_EXISTS, "Apollo editing key already exists");
             }
-        }
-        return result;
+            case DELETE -> {
+                if (before != null) yield true;
+                if (request.publish() && publishedKey) yield false;
+                throw new MigrationException(NOT_FOUND, "Apollo editing key does not exist");
+            }
+            case UPDATE -> !ApolloItemEndpoint.string(before, "value").equals(request.value());
+        };
     }
 
-    private Map<String, String> latest(ItemReadRequest request) {
-        HttpTransport.Response response = http.get(uri(request, "/releases/latest"), headers());
-        // namespace() has already established that this namespace exists.
-        if (response.status() == 404) return Map.of();
-        http.requireSuccess(response);
-        JsonNode values = http.json(response.body()).get("configurations");
-        if (values == null || !values.isObject())
-            throw new MigrationException(UPSTREAM_ERROR, "Apollo release lacks configurations");
-        Map<String, String> result = new LinkedHashMap<>();
-        for (var entry : values.properties()) {
-            if (!entry.getValue().isString())
-                throw new MigrationException(
-                        UPSTREAM_ERROR, "Apollo release contains a non-string value");
-            result.put(entry.getKey(), entry.getValue().asString());
+    private static boolean matches(ItemChangeRequest request, JsonNode item, JsonNode before) {
+        if (request.action() == DELETE) return item == null;
+        if (item == null || !request.value().equals(ApolloItemEndpoint.string(item, "value"))) {
+            return false;
         }
-        return result;
+        return switch (request.action()) {
+            case CREATE -> request.comment().equals(ApolloItemEndpoint.comment(item));
+            // Some OpenAPI namespace snapshots omit comments. The item read still verifies them.
+            case UPDATE -> !item.has("comment")
+                    || ApolloItemEndpoint.comment(before).equals(ApolloItemEndpoint.comment(item));
+            case DELETE -> throw new IllegalStateException("Deletion handled above");
+        };
     }
 
-    private void checkPending(Map<String, String> draft, Map<String, String> active, String key) {
+    private static void checkPending(Map<String, String> draft, Map<String, String> active, String key) {
         Map<String, String> otherDraft = new LinkedHashMap<>(draft);
         Map<String, String> otherActive = new LinkedHashMap<>(active);
         otherDraft.remove(key);
@@ -238,75 +200,30 @@ final class ApolloPortalClient {
         }
     }
 
-    private JsonNode get(ItemReadRequest request, String suffix) {
-        HttpTransport.Response response = http.get(uri(request, suffix), headers());
-        http.requireSuccess(response);
-        return http.json(response.body());
+    private ApolloItemEndpoint itemEndpoint(ItemReadRequest item) {
+        String portal = portalBaseUrl();
+        if (settings.hasOpenApiToken()) {
+            return new ApolloItemEndpoint(http, portal, item, tokenHeaders(), null);
+        }
+        return new ApolloItemEndpoint(http, portal, item, null, login(portal));
     }
 
-    private void write(
-            ItemReadRequest request, String suffix, HttpMethod method, Map<String, ?> body) {
-        HttpTransport.Response response =
-                http.writeJson(method, uri(request, suffix), headers(), body);
-        if (response.status() >= 500 || (response.status() >= 300 && response.status() < 400)) {
-            throw new MigrationException(
-                    WRITE_RESULT_UNKNOWN,
-                    "Apollo write was not acknowledged; read back before retrying");
-        }
-        if (response.status() == 400)
-            throw new MigrationException(
-                    INVALID_ARGUMENT, "Apollo rejected the operation arguments or operator");
-        if (response.status() == 409 || response.status() == 423) {
-            throw new MigrationException(
-                    CONCURRENT_MODIFICATION,
-                    "Apollo denied the operation because of a namespace lock or conflict");
-        }
-        if (response.status() == 201 || response.status() == 204) return;
-        http.requireSuccess(response);
-    }
-
-    private HttpHeaders headers() {
+    private HttpHeaders tokenHeaders() {
         HttpHeaders headers = new HttpHeaders();
-        headers.set(
-                "Authorization",
-                required(settings.openapiToken(), "omni.config.apollo.openapi-token"));
+        headers.set(HttpHeaders.AUTHORIZATION, settings.openapiToken());
         return headers;
     }
 
-    private URI uri(ItemReadRequest request, String suffix) {
-        Location location = request.location();
-        return URI.create(
-                portalBaseUrl()
-                        + "/openapi/v1/envs/"
-                        + segment(request.env())
-                        + "/apps/"
-                        + segment(location.appId())
-                        + "/clusters/"
-                        + segment(location.cluster())
-                        + "/namespaces/"
-                        + segment(location.namespace())
-                        + suffix);
+    private ApolloPortalSession login(String portal) {
+        String username = required(settings.portalUsername(), "omni.config.apollo.portal-username");
+        String password = required(settings.portalPassword(), "omni.config.apollo.portal-password");
+        var session = new ApolloPortalSession(http, portal);
+        session.login(username, password);
+        return session;
     }
 
     private String portalBaseUrl() {
         return HttpTransport.baseUrl(
                 required(settings.portalUrl(), "omni.config.apollo.portal-url"));
-    }
-
-    private static String segment(String value) {
-        return UriUtils.encodePathSegment(value, StandardCharsets.UTF_8);
-    }
-
-    private static String string(JsonNode node, String name) {
-        JsonNode value = node.get(name);
-        if (value == null || !value.isString())
-            throw new MigrationException(
-                    UPSTREAM_ERROR, "Apollo response lacks string field " + name);
-        return value.asString();
-    }
-
-    private static String optional(JsonNode node, String name) {
-        JsonNode value = node.get(name);
-        return value != null && value.isString() ? value.asString() : null;
     }
 }

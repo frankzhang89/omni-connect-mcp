@@ -112,7 +112,7 @@ class DatabaseAccessTest {
     }
 
     @Test
-    void supremeForwardsRawSqlAndKeepsResultOrderAndDuplicateColumnNames() throws SQLException {
+    void forwardsRawSqlAndKeepsResultOrderAndDuplicateColumnNames() throws SQLException {
         var runtime = manager("jdbc:sqlserver://localhost", null);
         var lease = runtime.acquire();
         var statement = mock(Statement.class);
@@ -130,7 +130,7 @@ class DatabaseAccessTest {
         when(row.getObject(1)).thenReturn(42);
         when(row.getObject(2)).thenReturn("second");
 
-        var result = new DatabaseSupremeTools(runtime, 2, 50, 8).execute(sql);
+        var result = new DatabaseRawSqlTools(runtime, 2, 50, 8).execute(sql);
 
         assertEquals(false, result.isError());
         assertEquals(

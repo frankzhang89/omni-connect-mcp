@@ -23,7 +23,7 @@ import javax.crypto.spec.SecretKeySpec;
 public class ApolloConfigStore
         implements ConfigStore.Readable,
                 ConfigStore.ItemReadable,
-                ConfigStore.ItemUpdatable,
+                ConfigStore.ItemWritable,
                 ConfigStore.AppDiscoverable {
     private final HttpTransport http;
     private final MigrationProperties.Apollo settings;
@@ -49,7 +49,7 @@ public class ApolloConfigStore
     @Override
     public Set<Capability> capabilities() {
         return Set.of(
-                Capability.READ, Capability.READ_ITEM, Capability.UPDATE_ITEM, Capability.DISCOVER);
+                Capability.READ, Capability.READ_ITEM, Capability.WRITE_ITEM, Capability.DISCOVER);
     }
 
     @Override
@@ -63,8 +63,8 @@ public class ApolloConfigStore
     }
 
     @Override
-    public ItemUpdateResult updateItem(ItemUpdateRequest request) {
-        return portal.updateItem(request);
+    public ItemChangeResult changeItem(ItemChangeRequest request) {
+        return portal.changeItem(request);
     }
 
     /**

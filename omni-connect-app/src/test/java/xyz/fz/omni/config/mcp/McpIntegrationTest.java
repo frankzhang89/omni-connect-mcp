@@ -112,6 +112,8 @@ class McpIntegrationTest {
                         "apollo_read_config",
                         "apollo_read_item",
                         "apollo_update_config",
+                        "apollo_create_config",
+                        "apollo_delete_config",
                         "nacos_read_config",
                         "nacos_publish_config",
                         "nacos_list_namespaces",
@@ -306,6 +308,46 @@ class McpIntegrationTest {
                 "apollo_update_config",
                 Map.of("key", "service.url", "value", "x", "fileType", "yaml"),
                 "INVALID_FORMAT");
+    }
+
+    @Test
+    void createsAndDeletesApolloItemsUsingTokenWithExplicitPublication() {
+        var target = Map.<String, Object>of("key", "new.key+one", "namespace", "crud-" + UUID.randomUUID());
+        var create = new HashMap<>(target);
+        create.put("value", "");
+        create.put("comment", "new remark");
+        var created = call("apollo_create_config", create);
+        assertThat(created.path("created").asBoolean()).isTrue();
+        assertThat(created.path("published").asBoolean()).isFalse();
+        assertThat(created.path("verified").asBoolean()).isTrue();
+        assertThat(call("apollo_read_item", target).path("comment").asString()).isEqualTo("new remark");
+        assertError("apollo_create_config", create, "ALREADY_EXISTS");
+        create.put("publish", true);
+        create.put("comment", "different remark");
+        assertError("apollo_create_config", create, "ALREADY_EXISTS");
+        create.put("comment", "new remark");
+        var publishedCreate = call("apollo_create_config", create);
+        assertThat(publishedCreate.path("created").asBoolean()).isFalse();
+        assertThat(publishedCreate.path("published").asBoolean()).isTrue();
+        var publishedTarget = Map.of("namespace", target.get("namespace"));
+        assertThat(call("apollo_read_config", publishedTarget).path("content").asString())
+                .contains("new.key+one=");
+
+        var deleted = call("apollo_delete_config", target);
+        assertThat(deleted.path("deleted").asBoolean()).isTrue();
+        assertThat(deleted.path("published").asBoolean()).isFalse();
+        assertError("apollo_read_item", target, "NOT_FOUND");
+        assertError("apollo_delete_config", target, "NOT_FOUND");
+        assertThat(call("apollo_read_config", publishedTarget).path("content").asString())
+                .contains("new.key+one=");
+        var releaseDeletion = new HashMap<>(target);
+        releaseDeletion.put("publish", true);
+        var publishedDelete = call("apollo_delete_config", releaseDeletion);
+        assertThat(publishedDelete.path("deleted").asBoolean()).isFalse();
+        assertThat(publishedDelete.path("published").asBoolean()).isTrue();
+        assertThat(publishedDelete.path("verified").asBoolean()).isTrue();
+        assertThat(call("apollo_read_config", publishedTarget).path("content").asString())
+                .doesNotContain("new.key+one=");
     }
 
     /** Runs the complete read-convert-publish-verify workflow through the MCP protocol. */
